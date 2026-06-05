@@ -7,8 +7,8 @@ chcp 65001
 REM 设置要生成的可执行文件的名称
 set OUTPUT_NAME=chat2api
 
-REM 设置 Go 源文件的名称
-SET GOFILE=chat2api
+REM 设置 Go 入口包路径
+SET GOFILE=./cmd
 
 REM 设置输出目录
 SET OUTPUTDIR=target

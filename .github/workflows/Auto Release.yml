@@ -25,10 +25,10 @@ jobs:
 
       - name: Build Binary
         run: |
-          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o ${{ env.APP_NAME }} -a -ldflags '-s -w -extldflags "-static"' . && rm -rf artifact && mkdir -p artifact && cp ${{ env.APP_NAME }} artifact/${{ env.APP_NAME }} && cd artifact && tar -czvf ../${{ env.APP_NAME }}-linux-amd64.tar.gz * && cd ..
-          GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -o ${{ env.APP_NAME }} -a -ldflags '-s -w -extldflags "-static"' . && rm -rf artifact && mkdir -p artifact && cp ${{ env.APP_NAME }} artifact/${{ env.APP_NAME }} && cd artifact && tar -czvf ../${{ env.APP_NAME }}-darwin-amd64.tar.gz * && cd ..
-          GOOS=freebsd GOARCH=amd64 CGO_ENABLED=0 go build -o ${{ env.APP_NAME }} -a -ldflags '-s -w -extldflags "-static"' . && rm -rf artifact && mkdir -p artifact && cp ${{ env.APP_NAME }} artifact/${{ env.APP_NAME }} && cd artifact && tar -czvf ../${{ env.APP_NAME }}-freebsd-amd64.tar.gz * && cd ..
-          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o ${{ env.APP_NAME }} -a -ldflags '-s -w -extldflags "-static"' . && rm -rf artifact && mkdir -p artifact && cp ${{ env.APP_NAME }} artifact/${{ env.APP_NAME }}.exe && cd artifact && tar -czvf ../${{ env.APP_NAME }}-windows-amd64.tar.gz * && cd ..
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o ${{ env.APP_NAME }} -a -ldflags '-s -w -extldflags "-static"' ./cmd && rm -rf artifact && mkdir -p artifact && cp ${{ env.APP_NAME }} artifact/${{ env.APP_NAME }} && cd artifact && tar -czvf ../${{ env.APP_NAME }}-linux-amd64.tar.gz * && cd ..
+          GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -o ${{ env.APP_NAME }} -a -ldflags '-s -w -extldflags "-static"' ./cmd && rm -rf artifact && mkdir -p artifact && cp ${{ env.APP_NAME }} artifact/${{ env.APP_NAME }} && cd artifact && tar -czvf ../${{ env.APP_NAME }}-darwin-amd64.tar.gz * && cd ..
+          GOOS=freebsd GOARCH=amd64 CGO_ENABLED=0 go build -o ${{ env.APP_NAME }} -a -ldflags '-s -w -extldflags "-static"' ./cmd && rm -rf artifact && mkdir -p artifact && cp ${{ env.APP_NAME }} artifact/${{ env.APP_NAME }} && cd artifact && tar -czvf ../${{ env.APP_NAME }}-freebsd-amd64.tar.gz * && cd ..
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o ${{ env.APP_NAME }} -a -ldflags '-s -w -extldflags "-static"' ./cmd && rm -rf artifact && mkdir -p artifact && cp ${{ env.APP_NAME }} artifact/${{ env.APP_NAME }}.exe && cd artifact && tar -czvf ../${{ env.APP_NAME }}-windows-amd64.tar.gz * && cd ..
 
       - name: Upload Artifact
         uses: actions/upload-artifact@main

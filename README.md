@@ -193,7 +193,7 @@ curl http://127.0.0.1:3040/v1/responses \
 ## Powered By
 
 - Codex
-- 
+- aurorax-neo
 
 ## Sponsor
 
