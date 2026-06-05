@@ -10,7 +10,7 @@
 - 本地 `sk-` auth key：使用配置文件中的 `chatgpts` 账号池请求上游。
 - 直传 `at-` access token：使用 `Authorization: Bearer at-<real_access_token>`，跳过账号池，直接用 `at-` 后面的真实 access token 请求上游。
 
-说明：当前 Go 版本不再做模型映射，`model` 会直接传给上游；请求中未传 `model` 时默认使用 `auto`。
+说明：当前版本不再做模型映射，`model` 会直接传给上游；请求中未传 `model` 时默认使用 `auto`。
 
 ## 配置
 
