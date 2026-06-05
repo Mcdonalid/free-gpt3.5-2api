@@ -1,5 +1,8 @@
 # Start with a base image containing Go runtime
-FROM golang:1.25.0 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25.0 AS builder
+
+ARG TARGETOS
+ARG TARGETARCH
 
 # Set the working directory inside the container
 WORKDIR /app
@@ -15,7 +18,7 @@ RUN go mod download
 COPY . .
 
 # Build the Go app ensuring that the binary is statically linked
-RUN CGO_ENABLED=0 go build -o /app/chat2api ./cmd
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /app/chat2api ./cmd
 
 # Now use a smaller image to run the app
 FROM alpine:latest
