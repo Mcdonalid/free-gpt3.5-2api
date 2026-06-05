@@ -5,10 +5,8 @@ go 1.25.0
 require (
 	github.com/aurorax-neo/tls_client_httpi v0.0.0-20240621052611-65c63fa600d4
 	github.com/bogdanfinn/tls-client v1.7.5
-	github.com/donnie4w/go-logger v0.25.3
 	github.com/gin-gonic/gin v1.9.1
 	github.com/google/uuid v1.6.0
-	github.com/joho/godotenv v1.5.1
 	github.com/json-iterator/go v1.1.12
 	github.com/sirupsen/logrus v1.9.4
 	golang.org/x/crypto v0.48.0
@@ -22,7 +20,6 @@ require (
 	github.com/bytedance/sonic v1.9.1 // indirect
 	github.com/chenzhuoyu/base64x v0.0.0-20221115062448-fe3a3abad311 // indirect
 	github.com/cloudflare/circl v1.3.9 // indirect
-	github.com/donnie4w/gofer v0.0.0-20240319022744-3a9079ccc237 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.2 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
@@ -45,6 +42,5 @@ require (
 	golang.org/x/net v0.51.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260226221140-a57be14db171 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
