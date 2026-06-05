@@ -2,8 +2,6 @@ name: Build Docker Image
 
 on:
   push:
-    tags:
-      - 'release-v*'
   workflow_dispatch:
 
 env:
@@ -11,6 +9,7 @@ env:
 
 jobs:
   main:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'release-v')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -21,7 +20,15 @@ jobs:
       - name: Get Docker Image Tag
         shell: bash
         id: get_docker_image_tag
-        run: echo "tag=$(echo $GITHUB_REF | sed 's|refs/tags/release-v||')" >> $GITHUB_OUTPUT
+        env:
+          RELEASE_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            release_tag="release-v${GITHUB_SHA::7}"
+          else
+            release_tag="$(printf '%s' "$RELEASE_MESSAGE" | head -n 1 | awk '{print $1}')"
+          fi
+          echo "tag=${release_tag#release-v}" >> "$GITHUB_OUTPUT"
 
       - name: Set Up QEMU
         uses: docker/setup-qemu-action@v3
