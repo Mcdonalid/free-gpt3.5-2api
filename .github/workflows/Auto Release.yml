@@ -3,6 +3,10 @@ name: Auto Release
 on:
   push:
 
+permissions:
+  contents: write
+  actions: write
+
 env:
   APP_NAME: chat2api
 
@@ -66,8 +70,7 @@ jobs:
         id: release
         uses: softprops/action-gh-release@v2
         env:
-          # GITHUB_TOKEN
-          GITHUB_TOKEN: ${{ secrets.GB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
         with:
           # tag_name: 使用 commit message 第一段，例如 release-v1.0.0
           tag_name: ${{ steps.grn.outputs.tag }}
@@ -92,7 +95,7 @@ jobs:
       - name: Delete Workflow Runs
         uses: Mattraks/delete-workflow-runs@v2
         with:
-          token: ${{ secrets.GB_TOKEN }}
+          token: ${{ github.token }}
           repository: ${{ github.repository }}
           retain_days: 1
           keep_minimum_runs: 8

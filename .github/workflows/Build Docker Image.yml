@@ -4,6 +4,11 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  packages: write
+  actions: write
+
 env:
   GHCR_REPO: ghcr.io/aurorax-neo/chat2api
 
@@ -41,7 +46,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
-          password: ${{ secrets.GB_TOKEN }}
+          password: ${{ github.token }}
 
       - name: Cache Docker Layers
         uses: actions/cache@v4
@@ -68,7 +73,7 @@ jobs:
       - name: Delete Workflow Runs
         uses: Mattraks/delete-workflow-runs@v2
         with:
-          token: ${{ secrets.GB_TOKEN }}
+          token: ${{ github.token }}
           repository: ${{ github.repository }}
           retain_days: 1
           keep_minimum_runs: 8
