@@ -183,6 +183,6 @@ fabric.properties
 /.env
 /target/
 /CHANGELOG.md
-/temp.json
-/tokens.yml
-/tokens.yml
+conf/**
+chatgpt2api/**
+

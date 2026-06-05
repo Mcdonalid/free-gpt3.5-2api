@@ -5,10 +5,10 @@ REM 指定编码为 UTF-8
 chcp 65001
 
 REM 设置要生成的可执行文件的名称
-set OUTPUT_NAME=free-gpt3.5-2api
+set OUTPUT_NAME=chat2api
 
 REM 设置 Go 源文件的名称
-SET GOFILE=free-gpt3.5-2api
+SET GOFILE=chat2api
 
 REM 设置输出目录
 SET OUTPUTDIR=target

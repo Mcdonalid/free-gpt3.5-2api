@@ -1,177 +1,189 @@
-# [free-gpt3.5-2api](https://github.com/aurorax-neo/free-gpt3.5-2api)
+# chat2api
 
+把 ChatGPT Web 侧能力转换为兼容 OpenAI 风格的 HTTP API。
 
+## 支持能力
 
-## 一、支持
+- `POST /v1/chat/completions`：兼容 Chat Completions，请求支持普通 JSON 与 stream。
+- `POST /v1/responses`：兼容 Responses API 文本链路，请求支持普通 JSON 与 stream。
+- `GET /v1/accTokens`：查看配置账号池可用数量。
+- 本地 `sk-` auth key：使用配置文件中的 `chatgpts` 账号池请求上游。
+- 直传 `at-` access token：使用 `Authorization: Bearer at-<real_access_token>`，跳过账号池，直接用 `at-` 后面的真实 access token 请求上游。
 
-#### 1.支持免登录chat2api
+说明：当前 Go 版本不再做模型映射，`model` 会直接传给上游；请求中未传 `model` 时默认使用 `auto`。
 
-#### 2.支持账号chat2api（Authorization Bearer eyJhbGciOiJSUz***）
+## 配置
 
-#### 3.支持账号ACCESS_TOKEN（Authorization Bearer ac-***）
+服务读取 `conf/app.<ENV>.yaml`，`ENV` 默认为 `dev`，因此本地默认读取 `conf/app.dev.yaml`。
 
-## 二、配置
+当前版本的业务配置以 YAML 文件为准，环境变量只用于选择配置文件：
 
-#### 环境变量
+| 环境变量 | 默认值 | 作用 |
+| --- | --- | --- |
+| `ENV` | `dev` | 决定读取哪个配置文件，例如 `ENV=prod` 会读取 `conf/app.prod.yaml`。 |
 
+常见配置文件对应关系：
+
+| 启动方式 | 读取文件 |
+| --- | --- |
+| `go run ./cmd` | `conf/app.dev.yaml` |
+| `ENV=test go run ./cmd` | `conf/app.test.yaml` |
+| `ENV=prod go run ./cmd` | `conf/app.prod.yaml` |
+
+```yaml
+log_level: debug
+log_path: logs
+log_file: app.dev.log
+bind: 127.0.0.1
+port: 3040
+
+auth:
+  access_tokens:
+    - sk-your-local-key
+
+proxy: http://127.0.0.1:7890
+chatgpt_base_url: https://chatgpt.com
+
+chatgpts:
+  - id_token: optional_id_token
+    access_token: real_access_token
+    refresh_token: optional_refresh_token
+    account_id: optional_account_id
+    email: optional_email
+    type: codex
+    proxy: ""
 ```
-LOG_LEVEL=info    	# debug, info, warn, error
-LOG_PATH=         	# 日志文件路径，默认为空（不生成日志文件）
-BIND=0.0.0.0      	# 127.0.0.1
-PORT=3040
-TOKENS_FILE=      	# 账号token文件，默认 tokens.yml
-PROXY=            	# http://127.0.0.1:7890,http://127.0.0.1:7890 已支持多个代理（英文 "," 分隔）
-AUTHORIZATIONS=   	# abc,bac (英文 "," 分隔)  注：必须
-BASE_URL=         	# 默认：https://chatgpt.com
+
+关键规则：
+
+- `auth.access_tokens` 保存裸 token，不要写 `Bearer`；请求时仍使用标准的 `Authorization: Bearer <token>`。
+- 如果 `auth.access_tokens` 为空，服务启动时会随机生成一个 `sk-` token，写回配置文件，并在日志中打印 `current auth: ...`。
+- `chatgpts[].access_token` 是账号池的真实上游 access token。通过本地 `sk-` key 请求时会从这里选择账号。
+- 代理优先级为账号代理优先：`chatgpts[].proxy` 不为空时使用账号代理；为空时回退到全局 `proxy`。
+- `chatgpt_base_url` 为空时默认使用 `https://chatgpt.com`。
+
+## 运行
+
+本地运行：
+
+```bash
+go run ./cmd
 ```
 
-###### 也可使用与程序同目录下 `.env` 文件配置上述字段
+指定环境运行，例如读取 `conf/app.prod.yaml`：
 
-- ##### 若要使用TOKENS_FILE内的账号，AUTHORIZATIONS字段内必须配置`ac-`开头的AUTHORIZATION并使用ac-***调用本程序，若ACCESS_TOKENS无可用账号则返回401错误，`tokens.yml`详见`tokens.template.yml`
-
-- ##### `AUTHORIZATIONS `功能（access_token）：防止使用求头access_token的API接口被刷，使用方式 `access_token#{abc}` ,{abc}替换为 `AUTHORIZATIONS` 内的任意一项
-
-## 三、部署
-
-### 1.docker部署
-
-##### 1 .创建文件夹
-
-```
-mkdir -p $PWD/free-gpt3.5-2api
+```bash
+ENV=prod go run ./cmd
 ```
 
-##### 2.拉取镜像启动
+Docker Compose：
 
-```
-docker run -itd  --name=free-gpt3.5-2api -e AUTHORIZATIONS=abc,bac -p 9846:3040 ghcr.io/aurorax-neo/free-gpt3.5-2api
-```
-
-###### 注意：-e AUTHORIZATIONS=abc,bac 请自行修改，避免接口被刷
-
-##### 3.更新容器
-
-```
-docker run --rm -v /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower -cR free-gpt3.5-2api --debug
-```
-
-### 2.docker-compose部署
-
-##### 1.快速启动
-
-###### 把本仓库根目录的compose.yaml文件下载到你的电脑(最好为它建立一个free-gpt3.5-2api文件夹，放在文件夹里，这样防止多个compose文件冲突)，在compose.yaml目录下运行如下命令
-
-```
+```bash
 docker compose up -d
 ```
 
-##### 2.更新容器
+默认 `compose.yaml` 将容器 `3040` 端口映射到宿主机 `7846`，并映射本地配置与日志目录：
 
-```
-docker compose pull
-docker compose up -d
-```
-
-##### 3.配置文件说明
-
-```
-services:
-  free-gpt3.5-2api:
-    container_name: free-gpt3.5-2api        #这里写你想起的容器名称
-    image: ghcr.io/aurorax-neo/free-gpt3.5-2api
-    ports:
-      - 7846:3040       #docker默认不经过ufw和firewall,如果想要不暴露端口到外网，在端口前加127.0.0.1,像这样 127.0.0.1:7846:3040
-      					#7846:3040 前面是主机端口,可以自定义，后面是容器端口不要修改
-    
-    restart: unless-stopped       #容器停止和启动须经过手动操作，不会随docker自启
-    environment:
-      - AUTHORIZATIONS=abc,bac        #注意：“=”后的内容请自行修改，避免接口被刷   
-
+```yaml
+volumes:
+  - .chat2api/conf:/app/conf
+  - .chat2api/logs:/app/logs
 ```
 
-###### 
+容器内工作目录是 `/app`，因此默认会读取 `/app/conf/app.dev.yaml`，也就是宿主机的 `.chat2api/conf/app.dev.yaml`。如需让容器读取其他环境配置，可以在 `compose.yaml` 中增加 `ENV`：
 
-### 3.Vercel部署
-
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/aurorax-neo/free-gpt3.5-2api&project-name=free-gpt3.5-2api&repository-name=free-gpt3.5-2api)
-
-### 4.Koyeb部署
-
-###### 注意：`Regions`请选择支持`openai`免登的区域！！！现原生ip已不支持免登，请配置代理使用！！！
-
-[![Deploy to Koyeb](https://www.koyeb.com/static/images/deploy/button.svg)](https://app.koyeb.com/deploy?type=docker&name=free-gpt3-5-2api&region=par&ports=3040;http;/&image=ghcr.io/aurorax-neo/free-gpt3.5-2api)
-
-## 四、接口
-
-#### 1./v1/accTokens
-
-`Authorization`使用 `AUTHORIZATIONS`其中任意一个
-
-```
-curl --location --request GET 'http://127.0.0.1:9846/v1/accTokens' \
---header 'Authorization: Bearer abc'
+```yaml
+environment:
+  - ENV=prod
 ```
 
-返回示例说明：`count`为ACCESS_TOKEN池中可用授权数
+此时容器会读取宿主机映射进去的 `.chat2api/conf/app.prod.yaml`。
 
-```
-{
-    "count": 1,
-    "canUseCount": 1
-}
-```
+## 接口示例
 
-#### 2./v1/chat/completions
+下面示例以本地开发配置 `127.0.0.1:3040` 为例。
 
-###### 支持返回stream和json
+### 查看账号池
 
-```
-http://<ip>:<port>/v1/chat/completions
+```bash
+curl http://127.0.0.1:3040/v1/accTokens \
+  -H 'Authorization: Bearer sk-your-local-key'
 ```
 
-##### 示例
+返回中的 `count` 是账号池账号数量，`canUseCount` 是当前可用账号数量。
 
-```
-curl http://127.0.0.1:9846
-```
+### Chat Completions
 
-```
-curl --location --request POST 'http://127.0.0.1:9846/v1/chat/completions' \
---header 'Authorization: Bearer abc' \
---header 'Content-Type: application/json' \
---data-raw '{
-    "model": "gpt-3.5-turbo",
-    "messages": [
-        {
-            "role": "user",
-            "content": "西红柿炒钢丝球怎么做?"
-        }
-    ],
-    "stream": false
-}'
+使用配置账号池：
+
+```bash
+curl http://127.0.0.1:3040/v1/chat/completions \
+  -H 'Authorization: Bearer sk-your-local-key' \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"auto","messages":[{"role":"user","content":"ping"}]}'
 ```
 
-## 五、模型映射
+直传真实 access token，跳过账号池：
 
+```bash
+curl http://127.0.0.1:3040/v1/chat/completions \
+  -H 'Authorization: Bearer at-<real_access_token>' \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"auto","messages":[{"role":"user","content":"ping"}]}'
 ```
-"gpt-3.5-turbo":          "text-davinci-002-render-sha",
-"gpt-3.5-turbo-16k":      "text-davinci-002-render-sha",
-"gpt-3.5-turbo-16k-0613": "text-davinci-002-render-sha",
-"gpt-3.5-turbo-0301":     "text-davinci-002-render-sha",
-"gpt-3.5-turbo-0613":     "text-davinci-002-render-sha",
-"gpt-3.5-turbo-1106":     "text-davinci-002-render-sha",
-"gpt-4o":                 "gpt-4o",
-"auto":                   "auto",
-"gpt-4o-av":              "gpt-4o-av",
+
+流式返回：
+
+```bash
+curl http://127.0.0.1:3040/v1/chat/completions \
+  -H 'Authorization: Bearer sk-your-local-key' \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"auto","stream":true,"messages":[{"role":"user","content":"ping"}]}'
 ```
+
+### Responses
+
+普通文本请求：
+
+```bash
+curl http://127.0.0.1:3040/v1/responses \
+  -H 'Authorization: Bearer sk-your-local-key' \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"auto","input":"ping"}'
+```
+
+带 instructions：
+
+```bash
+curl http://127.0.0.1:3040/v1/responses \
+  -H 'Authorization: Bearer sk-your-local-key' \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"auto","instructions":"用中文回答","input":"ping"}'
+```
+
+流式返回：
+
+```bash
+curl http://127.0.0.1:3040/v1/responses \
+  -H 'Authorization: Bearer sk-your-local-key' \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"auto","stream":true,"input":"ping"}'
+```
+
+当前 Go 版本的 `/v1/responses` 仅实现文本链路；`image_generation` 工具会返回未实现错误。
+
+## 错误排查
+
+- `401 Incorrect API key`：检查请求头是否为 `Authorization: Bearer sk-your-local-key`，以及配置里的 `auth.access_tokens` 是否保存裸 token。
+- `turnstile token is required` 或 `turnstile token failed`：上游要求 Turnstile 校验，需确认账号 token、代理和上游访问环境是否可用。
+- 账号池不可用：检查 `chatgpts[].access_token` 是否为空、是否过期，以及账号是否处于冷却时间。
+- 代理不生效：先检查账号自己的 `chatgpts[].proxy`，它会优先于全局 `proxy`。
 
 ## 参考项目
 
 - https://github.com/aurora-develop/aurora
-
 - https://github.com/xqdoo00o/ChatGPT-to-API
-
-[![Powered by DartNode](https://dartnode.com/branding/DN-Open-Source-sm.png)](https://dartnode.com "Powered by DartNode - Free VPS for Open Source")
+- https://github.com/basketikun/chatgpt2api
 
 ## Sponsor
 
@@ -179,6 +191,6 @@ curl --location --request POST 'http://127.0.0.1:9846/v1/chat/completions' \
 
 CDN acceleration and security protection for this project are sponsored by Tencent EdgeOne.
 
-## 🌟 Star History
+## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=aurorax-neo/free-gpt3.5-2api&type=Date)](https://star-history.com/#aurorax-neo/free-gpt3.5-2api&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=aurorax-neo/chat2api&type=Date)](https://star-history.com/#aurorax-neo/chat2api&Date)

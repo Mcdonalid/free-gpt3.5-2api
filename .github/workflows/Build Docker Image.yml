@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 env:
-  GHCR_REPO: ghcr.io/aurorax-neo/free-gpt3.5-2api
+  GHCR_REPO: ghcr.io/aurorax-neo/chat2api
 
 jobs:
   main:

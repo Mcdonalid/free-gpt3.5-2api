@@ -15,7 +15,7 @@ RUN go mod download
 COPY . .
 
 # Build the Go app ensuring that the binary is statically linked
-RUN CGO_ENABLED=0 go build -o /app/f99871322b15ff5007f0 .
+RUN CGO_ENABLED=0 go build -o /app/chat2api .
 
 # Now use a smaller image to run the app
 FROM alpine:latest
@@ -24,10 +24,10 @@ FROM alpine:latest
 WORKDIR /app
 
 # Copy the statically-linked binary into the new container
-COPY --from=builder /app/f99871322b15ff5007f0 /app/f99871322b15ff5007f0
+COPY --from=builder /app/chat2api /app/chat2api
 
 # This container exposes port 3040 to the outside world
 EXPOSE 3040
 
 # Run the binary.
-CMD [ "/app/f99871322b15ff5007f0" ]
+CMD [ "/app/chat2api" ]

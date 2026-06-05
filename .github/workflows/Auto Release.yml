@@ -6,7 +6,7 @@ on:
       - 'release-v*'
 
 env:
-  APP_NAME: free-gpt3.5-2api
+  APP_NAME: chat2api
 
 jobs:
   release:
