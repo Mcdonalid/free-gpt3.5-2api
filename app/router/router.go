@@ -1,4 +1,4 @@
-package api
+package router
 
 import (
 	"chat2api/app/conf"
@@ -28,37 +28,7 @@ var runtime = &routerRuntime{}
 const defaultHTTPShutdownTimeout = 10 * time.Second
 
 func Init(ctx context.Context) func(ctx context.Context) {
-	// 强制使用 release 模式，避免 Gin 调试日志在生产/测试环境造成额外噪音和信息泄露风险。
-	gin.SetMode(gin.ReleaseMode)
-	// 采用 gin.New() 而非 gin.Default()，显式控制中间件装配，防止默认 Recovery/Logger 与项目日志规范冲突。
-	runtime.Engine = gin.New()
-
-	// NoRoute 统一返回业务错误码，保证前端和调用方在“路径不存在”场景下拿到稳定的结构化响应。
-	runtime.Engine.NoRoute(func(ctx *gin.Context) {
-		result.New(ctx).Error(error_code.NotFound)
-	})
-
-	// NoMethod 统一处理“路径存在但 HTTP 方法不支持”，避免返回框架默认文案导致客户端分支判断复杂。
-	runtime.Engine.NoMethod(func(ctx *gin.Context) {
-		result.New(ctx).Error(error_code.MethodNotAllowed)
-	})
-
-	// 统一接入项目日志中间件，确保请求链路日志字段（trace/tag 等）与全局日志规范一致。
-	runtime.Engine.Use(middleware.Logger())
-
-	// Initialize HTTP server
-	gin.SetMode(gin.ReleaseMode)
-	// Register routes
-	runtime.Engine.GET("/", Index)
-	runtime.Engine.GET("/ping", Ping)
-	v1Router := runtime.Engine.Group("/v1")
-	v1Router.Use(middleware.V1Cors)
-	v1Router.Use(middleware.V1Auth)
-	v1Router.GET("/accTokens", service.AccTokens)
-	v1Router.OPTIONS("/chat/completions", nil)
-	v1Router.POST("/chat/completions", service.Completions)
-	v1Router.OPTIONS("/responses", nil)
-	v1Router.POST("/responses", service.Responses)
+	runtime.Engine = NewEngine()
 
 	runtime.Server = &http.Server{
 		Addr:    fmt.Sprintf("%v:%v", conf.App.Bind, conf.App.Port),
@@ -98,8 +68,45 @@ func Init(ctx context.Context) func(ctx context.Context) {
 	}
 }
 
+func NewEngine() *gin.Engine {
+	// 强制使用 release 模式，避免 Gin 调试日志在生产/测试环境造成额外噪音和信息泄露风险。
+	gin.SetMode(gin.ReleaseMode)
+	// 采用 gin.New() 而非 gin.Default()，显式控制中间件装配，防止默认 Recovery/Logger 与项目日志规范冲突。
+	engine := gin.New()
+
+	// NoRoute 统一返回业务错误码，保证前端和调用方在“路径不存在”场景下拿到稳定的结构化响应。
+	engine.NoRoute(func(ctx *gin.Context) {
+		result.New(ctx).Error(error_code.NotFound)
+	})
+
+	// NoMethod 统一处理“路径存在但 HTTP 方法不支持”，避免返回框架默认文案导致客户端分支判断复杂。
+	engine.NoMethod(func(ctx *gin.Context) {
+		result.New(ctx).Error(error_code.MethodNotAllowed)
+	})
+
+	// 统一接入项目日志中间件，确保请求链路日志字段（trace/tag 等）与全局日志规范一致。
+	engine.Use(middleware.Logger())
+
+	// Register routes
+	engine.GET("/", Index)
+	engine.GET("/ping", Ping)
+	v1Router := engine.Group("/v1")
+	v1Router.Use(middleware.V1Cors)
+	v1Router.Use(middleware.V1Auth)
+	v1Router.GET("/accTokens", service.AccTokens)
+	v1Router.OPTIONS("/chat/completions", nil)
+	v1Router.POST("/chat/completions", service.Completions)
+	v1Router.OPTIONS("/responses", nil)
+	v1Router.POST("/responses", service.Responses)
+
+	return engine
+}
+
 // HandlerGinEngine gin http handler
 func HandlerGinEngine(w http.ResponseWriter, r *http.Request) {
+	if runtime.Engine == nil {
+		runtime.Engine = NewEngine()
+	}
 	runtime.Engine.ServeHTTP(w, r)
 }
 

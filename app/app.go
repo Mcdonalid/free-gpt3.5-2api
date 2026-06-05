@@ -1,9 +1,9 @@
 package app
 
 import (
-	"chat2api/app/api"
 	"chat2api/app/conf"
 	"chat2api/app/env"
+	"chat2api/app/router"
 	"chat2api/pkg/logx"
 	"context"
 	"os"
@@ -44,7 +44,7 @@ func Run(ctx context.Context) {
 	cleanups.push(conf.Init(ctx))
 
 	// gin
-	cleanups.push(api.Init(ctx))
+	cleanups.push(router.Init(ctx))
 
 	switch env.Curr {
 	case env.DEV:
