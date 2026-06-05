@@ -16,6 +16,8 @@
 
 服务读取 `conf/app.<ENV>.yaml`，`ENV` 默认为 `dev`，因此本地默认读取 `conf/app.dev.yaml`。
 
+仓库提供了配置模板 `conf/app.demo.yaml`。本地运行时可以复制为 `conf/app.dev.yaml`；Docker Compose 运行时可以复制为 `.chat2api/conf/app.dev.yaml`，因为 compose 会把 `.chat2api/conf` 映射到容器内的 `/app/conf`。
+
 当前版本的业务配置以 YAML 文件为准，环境变量只用于选择配置文件：
 
 | 环境变量 | 默认值 | 作用 |
@@ -49,8 +51,10 @@ chatgpts:
     access_token: real_access_token
     refresh_token: optional_refresh_token
     account_id: optional_account_id
+    last_refresh: ""
     email: optional_email
     type: codex
+    expired: ""
     proxy: ""
 ```
 
@@ -58,6 +62,7 @@ chatgpts:
 
 - `auth.access_tokens` 保存裸 token，不要写 `Bearer`；请求时仍使用标准的 `Authorization: Bearer <token>`。
 - 如果 `auth.access_tokens` 为空，服务启动时会随机生成一个 `sk-` token，写回配置文件，并在日志中打印 `current auth: ...`。
+- `chatgpts` 是账号池配置，每个账号只有 `access_token` 是必要配置；`proxy`、`id_token`、`refresh_token`、`email` 等字段都是可选字段。
 - `chatgpts[].access_token` 是账号池的真实上游 access token。通过本地 `sk-` key 请求时会从这里选择账号。
 - 代理优先级为账号代理优先：`chatgpts[].proxy` 不为空时使用账号代理；为空时回退到全局 `proxy`。
 - `chatgpt_base_url` 为空时默认使用 `https://chatgpt.com`。
@@ -184,6 +189,11 @@ curl http://127.0.0.1:3040/v1/responses \
 - https://github.com/aurora-develop/aurora
 - https://github.com/xqdoo00o/ChatGPT-to-API
 - https://github.com/basketikun/chatgpt2api
+
+## Powered By
+
+- Codex
+- 
 
 ## Sponsor
 

@@ -1,0 +1,45 @@
+# Copy this file to conf/app.dev.yaml for local runs, or to
+# .chat2api/conf/app.dev.yaml when using docker compose.
+log_level: debug
+log_path: logs
+log_file: app.dev.log
+bind: 127.0.0.1
+port: 3040
+
+# Local API keys for clients calling this service.
+# Store bare tokens here; clients still send: Authorization: Bearer <token>
+# If this list is empty, the service generates a sk- token at startup and writes it back.
+auth:
+  access_tokens:
+    - sk-your-local-key
+
+# Global proxy. Account-level proxy below has higher priority.
+proxy: http://127.0.0.1:7890
+
+# Upstream ChatGPT base URL. Empty value defaults to https://chatgpt.com.
+chatgpt_base_url: https://chatgpt.com
+
+# Account pool used by local sk-* auth keys.
+# Required field per account: access_token.
+# Other fields are optional metadata or auxiliary settings.
+chatgpts:
+  - id_token: optional_id_token_1
+    access_token: real_access_token_1
+    refresh_token: optional_refresh_token_1
+    account_id: optional_account_id_1
+    last_refresh: ""
+    email: user1@example.com
+    type: codex
+    expired: ""
+    proxy: ""
+
+  # Optional second account. This account uses its own proxy instead of the global proxy.
+  - id_token: optional_id_token_2
+    access_token: real_access_token_2
+    refresh_token: optional_refresh_token_2
+    account_id: optional_account_id_2
+    last_refresh: ""
+    email: user2@example.com
+    type: codex
+    expired: ""
+    proxy: http://127.0.0.1:7891

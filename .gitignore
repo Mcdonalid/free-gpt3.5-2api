@@ -184,5 +184,6 @@ fabric.properties
 /target/
 /CHANGELOG.md
 conf/**
+!/conf/app.demo.yaml
 chatgpt2api/**
 
