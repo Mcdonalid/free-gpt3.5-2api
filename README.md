@@ -192,8 +192,13 @@ curl http://127.0.0.1:3040/v1/responses \
 
 ## Powered By
 
-- Codex
-- aurorax-neo
+- codex
+- [aurorax-neo](https://github.com/aurorax-neo)
+
+## Friend Links
+
+- [linux.do](https://linux.do/)
+- [xiaozhou26](https://github.com/xiaozhou26)
 
 ## Sponsor
 
