@@ -90,6 +90,8 @@ func NewEngine() *gin.Engine {
 
 	// Register routes
 	engine.GET("/", Index)
+	engine.GET("/favicon.ico", Favicon)
+	engine.GET("/favicon.png", Favicon)
 	engine.GET("/ping", Ping)
 	v1Router := engine.Group("/v1")
 	v1Router.Use(middleware.V1Cors)
@@ -116,6 +118,10 @@ func Ping(c *gin.Context) {
 	c.JSON(200, gin.H{
 		"message": "pong",
 	})
+}
+
+func Favicon(c *gin.Context) {
+	c.Status(http.StatusNoContent)
 }
 
 // Index 首页
