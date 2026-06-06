@@ -23,30 +23,20 @@ import (
 )
 
 func Completions(c *gin.Context) {
-	// 从请求中获取参数
 	apiReq := &completions.ApiReq{}
 	err := c.BindJSON(apiReq)
 	if err != nil {
 		common.ErrorResponse(c, http.StatusBadRequest, "Invalid parameter", nil)
 		return
 	}
-	// 转换请求
-	ChatReq35 := chat_backend.BuildChatRequest(apiReq)
-	if ChatReq35.Model == "" {
+	chatReq := chat_backend.BuildChatRequest(apiReq)
+	if chatReq.Model == "" {
 		errStr := fmt.Sprint("Model is unsupported")
 		logx.WithContext(c.Request.Context()).Error(errStr)
 		common.ErrorResponse(c, http.StatusBadRequest, errStr, nil)
 		return
 	}
-	// 请求参数
-	_, err = common.Struct2BytesBuffer(ChatReq35)
-	if err != nil {
-		logx.WithContext(c.Request.Context()).Error(err.Error())
-		common.ErrorResponse(c, http.StatusInternalServerError, "", err)
-		return
-
-	}
-	body, err := common.Struct2BytesBuffer(ChatReq35)
+	body, err := common.Struct2BytesBuffer(chatReq)
 	if err != nil {
 		logx.WithContext(c.Request.Context()).Error(err.Error())
 		common.ErrorResponse(c, http.StatusInternalServerError, "", err)
@@ -201,8 +191,6 @@ func normalizeRateLimitUnix(value int64, now time.Time) int64 {
 	if value <= 0 {
 		return 0
 	}
-	// Small values from Retry-After/reset_after are durations in seconds;
-	// large values are treated as absolute Unix timestamps.
 	if value < 30*24*3600 {
 		return now.Add(time.Duration(value) * time.Second).Unix()
 	}
@@ -235,20 +223,20 @@ type chatResult struct {
 	Content        string
 	ConversationId string
 	MessageId      string
+	FinishReason   string
 }
 
-func handlerResponse(c *gin.Context, apiReq *completions.ApiReq, resp *http.Response) (*chatResult, error) {
+type chatStreamEvent struct {
+	Response     types.ChatResp
+	Delta        string
+	IsFirstChunk bool
+	Result       *chatResult
+}
+
+func handleChatStream(resp *http.Response, onEvent func(chatStreamEvent) error) (*chatResult, error) {
 	reader := bufio.NewReader(resp.Body)
-	if apiReq.Stream {
-		c.Header("Content-Type", "text/event-stream")
-	} else {
-		c.Header("Content-Type", "application/json")
-	}
-	id := chat_backend.GenerateCompletionID(29)
 	var previousText types.StringStruct
-	var finishReason string
-	var isRole = true
-	var contentParts []string
+	isFirstChunk := true
 	result := &chatResult{}
 	for {
 		line, err := reader.ReadString('\n')
@@ -292,27 +280,67 @@ func handlerResponse(c *gin.Context, apiReq *completions.ApiReq, resp *http.Resp
 		if chatResp.Message.Content.ContentType != "" && !strings.HasSuffix(chatResp.Message.Content.ContentType, "text") {
 			continue
 		}
-		responseString := completions.ConvertToString(id, apiReq.Model, &chatResp, &previousText, isRole)
-		if responseString == "" {
+		if len(chatResp.Message.Content.Parts) == 0 {
 			continue
 		}
-		isRole = false
-		contentParts = append(contentParts, strings.TrimPrefix(responseString, "data: "))
-		if apiReq.Stream {
-			if _, err := c.Writer.WriteString(responseString); err != nil {
+		text, ok := chatResp.Message.Content.Parts[0].(string)
+		if !ok {
+			continue
+		}
+		delta := strings.Replace(text, previousText.Text, "", 1)
+		if !isFirstChunk && delta == "" {
+			continue
+		}
+		previousText.Text = text
+		if onEvent != nil {
+			if err := onEvent(chatStreamEvent{
+				Response:     chatResp,
+				Delta:        delta,
+				IsFirstChunk: isFirstChunk,
+				Result:       result,
+			}); err != nil {
 				return nil, err
 			}
-			c.Writer.Flush()
 		}
+		isFirstChunk = false
 		if chatResp.Message.Metadata.FinishDetails != nil {
-			finishReason = chatResp.Message.Metadata.FinishDetails.Type
+			result.FinishReason = chatResp.Message.Metadata.FinishDetails.Type
 		}
 	}
+	result.Content = previousText.Text
+	return result, nil
+}
+
+func handlerResponse(c *gin.Context, apiReq *completions.ApiReq, resp *http.Response) (*chatResult, error) {
 	if apiReq.Stream {
-		finalLine := completions.StopChunk(id, apiReq.Model, finishReason)
+		c.Header("Content-Type", "text/event-stream")
+	} else {
+		c.Header("Content-Type", "application/json")
+	}
+	id := chat_backend.GenerateCompletionID(29)
+	result, err := handleChatStream(resp, func(event chatStreamEvent) error {
+		if !apiReq.Stream {
+			return nil
+		}
+		apiRespJson := completions.NewApiRespStream(id, apiReq.Model, event.Delta)
+		apiRespJson.ConversationId = event.Response.ConversationId
+		apiRespJson.MessageId = event.Response.Message.Id
+		if event.IsFirstChunk {
+			apiRespJson.Choices[0].Delta.Role = event.Response.Message.Author.Role
+		}
+		if _, err := c.Writer.WriteString("data: " + apiRespJson.String() + "\n\n"); err != nil {
+			return err
+		}
+		c.Writer.Flush()
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if apiReq.Stream {
+		finalLine := completions.StopChunk(id, apiReq.Model, result.FinishReason)
 		_, _ = c.Writer.WriteString(fmt.Sprint("data: ", finalLine.String(), "\n\n"))
 		_, _ = c.Writer.WriteString("data: [DONE]\n\n")
 	}
-	result.Content = previousText.Text
 	return result, nil
 }

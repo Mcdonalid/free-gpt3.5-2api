@@ -30,14 +30,14 @@ func Responses(c *gin.Context) {
 	}
 	compReq := &completions.ApiReq{
 		Model:    responses.NormalizeModel(apiReq.Model),
-		Stream:   false,
+		Stream:   apiReq.Stream,
 		Messages: responseMessages(apiReq),
 	}
 	if len(compReq.Messages) == 0 {
 		common.ErrorResponse(c, http.StatusBadRequest, "input text is required", nil)
 		return
 	}
-	result, err := runTextConversation(c, compReq)
+	result, err := runTextConversation(c, compReq, apiReq.Stream)
 	if err != nil {
 		logx.WithContext(c.Request.Context()).Error(err.Error())
 		common.ErrorResponse(c, http.StatusBadGateway, "", err.Error())
@@ -46,15 +46,11 @@ func Responses(c *gin.Context) {
 	if result == nil {
 		return
 	}
-	if apiReq.Stream {
-		emitResponseEvents(c, compReq.Model, result.Content)
-		return
-	}
 	item := responses.TextOutputItem(responses.MessageID(), result.Content, "completed")
 	c.JSON(http.StatusOK, responses.CompletedEvent(responses.ResponseID(), compReq.Model, time.Now().Unix(), []responses.OutputItem{item}).Response)
 }
 
-func runTextConversation(c *gin.Context, apiReq *completions.ApiReq) (*chatResult, error) {
+func runTextConversation(c *gin.Context, apiReq *completions.ApiReq, streamResponses bool) (*chatResult, error) {
 	chatReq := chat_backend.BuildChatRequest(apiReq)
 	body, err := common.Struct2BytesBuffer(chatReq)
 	if err != nil {
@@ -85,25 +81,52 @@ func runTextConversation(c *gin.Context, apiReq *completions.ApiReq) (*chatResul
 	if handleResponseError(c, resp, backend.AccAuth) {
 		return nil, nil
 	}
+	if streamResponses {
+		return streamResponseEvents(c, apiReq.Model, resp)
+	}
 	return handlerResponse(c, apiReq, resp)
 }
 
-func emitResponseEvents(c *gin.Context, model string, text string) {
+func streamResponseEvents(c *gin.Context, model string, resp *http.Response) (*chatResult, error) {
 	c.Header("Content-Type", "text/event-stream")
 	responseID := responses.ResponseID()
 	itemID := responses.MessageID()
 	created := time.Now().Unix()
-	_, _ = c.Writer.WriteString(responses.SSE(responses.CreatedEvent(responseID, model, created)))
+	if _, err := c.Writer.WriteString(responses.SSE(responses.CreatedEvent(responseID, model, created))); err != nil {
+		return nil, err
+	}
 	item := responses.TextOutputItem("", "", "in_progress")
 	item.ID = itemID
-	_, _ = c.Writer.WriteString(responses.SSE(responses.Event{Type: "response.output_item.added", OutputIndex: 0, Item: &item}))
-	_, _ = c.Writer.WriteString(responses.SSE(responses.Event{Type: "response.output_text.delta", ItemID: itemID, OutputIndex: 0, ContentIndex: 0, Delta: text}))
-	_, _ = c.Writer.WriteString(responses.SSE(responses.Event{Type: "response.output_text.done", ItemID: itemID, OutputIndex: 0, ContentIndex: 0, Text: text}))
-	completedItem := responses.TextOutputItem(itemID, text, "completed")
-	_, _ = c.Writer.WriteString(responses.SSE(responses.Event{Type: "response.output_item.done", OutputIndex: 0, Item: &completedItem}))
-	_, _ = c.Writer.WriteString(responses.SSE(responses.CompletedEvent(responseID, model, created, []responses.OutputItem{completedItem})))
+	if _, err := c.Writer.WriteString(responses.SSE(responses.Event{Type: "response.output_item.added", OutputIndex: 0, Item: &item})); err != nil {
+		return nil, err
+	}
+	c.Writer.Flush()
+	result, err := handleChatStream(resp, func(event chatStreamEvent) error {
+		if event.Delta == "" {
+			return nil
+		}
+		if _, err := c.Writer.WriteString(responses.SSE(responses.Event{Type: "response.output_text.delta", ItemID: itemID, OutputIndex: 0, ContentIndex: 0, Delta: event.Delta})); err != nil {
+			return err
+		}
+		c.Writer.Flush()
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if _, err := c.Writer.WriteString(responses.SSE(responses.Event{Type: "response.output_text.done", ItemID: itemID, OutputIndex: 0, ContentIndex: 0, Text: result.Content})); err != nil {
+		return nil, err
+	}
+	completedItem := responses.TextOutputItem(itemID, result.Content, "completed")
+	if _, err := c.Writer.WriteString(responses.SSE(responses.Event{Type: "response.output_item.done", OutputIndex: 0, Item: &completedItem})); err != nil {
+		return nil, err
+	}
+	if _, err := c.Writer.WriteString(responses.SSE(responses.CompletedEvent(responseID, model, created, []responses.OutputItem{completedItem}))); err != nil {
+		return nil, err
+	}
 	_, _ = c.Writer.WriteString("data: [DONE]\n\n")
 	c.Writer.Flush()
+	return result, nil
 }
 
 func responseMessages(req *responses.ApiReq) []completions.ApiMessage {

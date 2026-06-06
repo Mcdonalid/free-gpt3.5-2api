@@ -113,9 +113,21 @@ func NewLoader(ctx context.Context, path string, loadFn func([]byte) error) (*Lo
 	return l, nil
 }
 
-var App = app{
-	Bind: "0.0.0.0",
-	Port: 3040,
+var (
+	appMu sync.RWMutex
+	App   = defaultApp()
+)
+
+func GetApp() app {
+	appMu.RLock()
+	defer appMu.RUnlock()
+	return App
+}
+
+func setApp(next app) {
+	appMu.Lock()
+	defer appMu.Unlock()
+	App = next
 }
 
 func defaultApp() app {
@@ -125,25 +137,67 @@ func defaultApp() app {
 	}
 }
 
-func ensureAuthTokens(path string) error {
-	if len(nonEmptyAuthTokens(App.Auth.AccessTokens)) > 0 {
+func defaultGeneratedApp(curr env.Env) app {
+	bind := "127.0.0.1"
+	logLevel := "debug"
+	if curr == env.PROD {
+		bind = "0.0.0.0"
+		logLevel = "info"
+	}
+	return app{
+		LogLevel:       logLevel,
+		LogPath:        "logs",
+		LogFile:        "",
+		Bind:           bind,
+		Port:           3040,
+		Auth:           auth{AccessTokens: []string{}},
+		Proxy:          "",
+		ChatGPTBaseUrl: "https://chatgpt.com",
+		ChatGPTs:       []chatgpt{},
+	}
+}
+
+func ensureConfigFile(ctx context.Context, path string, curr env.Env) error {
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	data, err := yaml.Marshal(defaultGeneratedApp(curr))
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		return err
+	}
+	logx.WithContext(ctx).Infof("config file not found, generated default config: %s", path)
+	return nil
+}
+
+func ensureAuthTokens(path string, cfg *app) error {
+	if len(nonEmptyAuthTokens(cfg.Auth.AccessTokens)) > 0 {
+		cfg.Auth.AccessTokens = nonEmptyAuthTokens(cfg.Auth.AccessTokens)
 		return nil
 	}
 	token, err := newAuthToken()
 	if err != nil {
 		return err
 	}
-	App.Auth.AccessTokens = []string{token}
-	return saveAuthTokens(path, App.Auth.AccessTokens)
+	cfg.Auth.AccessTokens = []string{token}
+	return saveAuthTokens(path, cfg.Auth.AccessTokens)
 }
 
-func normalizeConfig() {
-	for i, token := range App.Auth.AccessTokens {
-		App.Auth.AccessTokens[i] = normalizeAuthToken(token)
+func normalizeConfig(cfg *app) {
+	cfg.Auth.AccessTokens = nonEmptyAuthTokens(cfg.Auth.AccessTokens)
+	for i, token := range cfg.Auth.AccessTokens {
+		cfg.Auth.AccessTokens[i] = normalizeAuthToken(token)
 	}
 	pool := acc_token_pool.GetAccAuthPoolInstance()
 	pool.Reset()
-	for _, account := range App.ChatGPTs {
+	for _, account := range cfg.ChatGPTs {
 		token := strings.TrimSpace(account.AccessToken)
 		token = strings.TrimPrefix(token, "Bearer ")
 		if token == "" {
@@ -155,6 +209,25 @@ func normalizeConfig() {
 			Proxy:     strings.TrimSpace(account.Proxy),
 		})
 	}
+}
+
+func maskedAuthTokens(tokens []string) []string {
+	masked := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		token = normalizeAuthToken(token)
+		if token == "" {
+			continue
+		}
+		masked = append(masked, maskToken(token))
+	}
+	return masked
+}
+
+func maskToken(token string) string {
+	if len(token) <= 10 {
+		return "***"
+	}
+	return token[:6] + "..." + token[len(token)-4:]
 }
 
 func nonEmptyAuthTokens(tokens []string) []string {
@@ -265,25 +338,33 @@ func setMappingChild(root *yaml.Node, key string, value *yaml.Node) {
 func Init(ctx context.Context) func(context.Context) {
 	wd, _ := os.Getwd()
 	path := filepath.Join(wd, "conf", fmt.Sprintf("app.%s.yaml", env.Curr))
+	if err := ensureConfigFile(ctx, path, env.Curr); err != nil {
+		logx.WithContext(ctx).Fatalf("generate config failed: %+v", err)
+	}
 	loader, err := NewLoader(ctx, path, func(data []byte) error {
-		App = defaultApp()
-		if err := yaml.Unmarshal(data, &App); err != nil {
+		next := defaultApp()
+		if err := yaml.Unmarshal(data, &next); err != nil {
 			return err
 		}
-		if err := ensureAuthTokens(path); err != nil {
+		if err := ensureAuthTokens(path, &next); err != nil {
 			return err
 		}
-		normalizeConfig()
-		logx.WithContext(ctx).Infof("current auth: %s", strings.Join(App.Auth.AccessTokens, ", "))
+		normalizeConfig(&next)
+		if err := logx.Configure(next.LogLevel, next.LogPath, next.LogFile); err != nil {
+			return err
+		}
+		setApp(next)
+		logx.WithContext(ctx).Infof("current auth tokens: count=%d masked=%s", len(next.Auth.AccessTokens), strings.Join(maskedAuthTokens(next.Auth.AccessTokens), ", "))
 		return nil
 	})
 	if err != nil {
-		logx.WithContext(ctx).Errorf("load config failed, use default config: %+v", err)
+		logx.WithContext(ctx).Fatalf("load config failed: %+v", err)
 	}
 
 	return func(context.Context) {
 		if loader != nil {
 			loader.Close()
 		}
+		logx.CloseOutput()
 	}
 }
