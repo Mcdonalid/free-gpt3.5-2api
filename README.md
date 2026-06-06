@@ -89,6 +89,16 @@ Docker Compose：
 docker compose up -d
 ```
 
+Vercel 运行时不会写入配置文件；如果没有提交 `conf/app.<ENV>.yaml`，请在 Vercel 环境变量中配置：
+
+| 环境变量 | 作用 |
+| --- | --- |
+| `AUTH_TOKENS` | 本地 API key，多个值用逗号、分号或换行分隔 |
+| `CHATGPT_ACCESS_TOKENS` | 上游 ChatGPT access token，多个值用逗号、分号或换行分隔 |
+| `PROXY` | 可选，全局代理 |
+| `CHATGPT_BASE_URL` | 可选，默认 `https://chatgpt.com` |
+| `LOG_LEVEL` | 可选，默认 `debug` |
+
 默认 `compose.yaml` 将容器 `3040` 端口映射到宿主机 `7846`，并映射本地配置与日志目录：
 
 ```yaml

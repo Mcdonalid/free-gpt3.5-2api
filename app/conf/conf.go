@@ -368,3 +368,66 @@ func Init(ctx context.Context) func(context.Context) {
 		logx.CloseOutput()
 	}
 }
+
+func InitServerless(ctx context.Context) func(context.Context) {
+	wd, _ := os.Getwd()
+	path := filepath.Join(wd, "conf", fmt.Sprintf("app.%s.yaml", env.Curr))
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		logx.WithContext(ctx).Fatalf("load config failed: %+v", err)
+	}
+	next := defaultGeneratedApp(env.Curr)
+	if err == nil {
+		next = defaultApp()
+		if err := yaml.Unmarshal(data, &next); err != nil {
+			logx.WithContext(ctx).Fatalf("parse config failed: %+v", err)
+		}
+	}
+	applyEnvOverrides(&next)
+	next.Auth.AccessTokens = nonEmptyAuthTokens(next.Auth.AccessTokens)
+	normalizeConfig(&next)
+	if err := logx.Configure(next.LogLevel, next.LogPath, ""); err != nil {
+		logx.WithContext(ctx).Fatalf("configure log failed: %+v", err)
+	}
+	setApp(next)
+	logx.WithContext(ctx).Infof("current auth tokens: count=%d masked=%s", len(next.Auth.AccessTokens), strings.Join(maskedAuthTokens(next.Auth.AccessTokens), ", "))
+	return func(context.Context) {
+		logx.CloseOutput()
+	}
+}
+
+func applyEnvOverrides(cfg *app) {
+	if value := strings.TrimSpace(os.Getenv("AUTH_TOKENS")); value != "" {
+		cfg.Auth.AccessTokens = splitEnvList(value)
+	}
+	if value := strings.TrimSpace(os.Getenv("ACCESS_TOKENS")); value != "" {
+		cfg.Auth.AccessTokens = splitEnvList(value)
+	}
+	if value := strings.TrimSpace(os.Getenv("CHATGPT_ACCESS_TOKENS")); value != "" {
+		for _, token := range splitEnvList(value) {
+			cfg.ChatGPTs = append(cfg.ChatGPTs, chatgpt{AccessToken: token})
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("PROXY")); value != "" {
+		cfg.Proxy = value
+	}
+	if value := strings.TrimSpace(os.Getenv("CHATGPT_BASE_URL")); value != "" {
+		cfg.ChatGPTBaseUrl = value
+	}
+	if value := strings.TrimSpace(os.Getenv("LOG_LEVEL")); value != "" {
+		cfg.LogLevel = value
+	}
+}
+
+func splitEnvList(value string) []string {
+	parts := strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == '\n' || r == ';'
+	})
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
