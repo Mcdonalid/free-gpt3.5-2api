@@ -20,34 +20,37 @@ import (
 )
 
 const codexResponsesModel = "gpt-5.5"
-const codexResponsesInstructions = "Use the image_generation tool to create exactly one image for the user's request. Return the generated image result."
+const codexResponsesInstructions = "You are an image generation bridge. You must call the image_generation tool exactly once for the user's request. Do not answer with text. Do not claim that image generation is unavailable, disabled, or unsupported. Return only the generated image result."
 
 type codexResponsesPayload struct {
-	Model        string                   `json:"model"`
-	Instructions string                   `json:"instructions"`
-	Store        bool                     `json:"store"`
-	Input        []map[string]interface{} `json:"input"`
-	Tools        []responses.Tool         `json:"tools"`
-	ToolChoice   map[string]string        `json:"tool_choice"`
-	Stream       bool                     `json:"stream"`
+	Model             string                   `json:"model"`
+	Instructions      string                   `json:"instructions"`
+	Store             bool                     `json:"store"`
+	Input             []map[string]interface{} `json:"input"`
+	Tools             []responses.Tool         `json:"tools"`
+	ToolChoice        map[string]string        `json:"tool_choice"`
+	Stream            bool                     `json:"stream"`
+	ParallelToolCalls bool                     `json:"parallel_tool_calls"`
 }
 
 func runCodexImageResponses(c *gin.Context, apiReq *responses.ApiReq) error {
-	prompt := extractResponsesPrompt(apiReq.Input)
+	currentInput := latestResponsesUserInput(apiReq.Input)
+	prompt := extractResponsesPrompt(currentInput)
 	if strings.TrimSpace(prompt) == "" {
 		common.ErrorResponse(c, http.StatusBadRequest, "input text is required", nil)
 		return nil
 	}
-	images := extractResponsesImages(apiReq.Input)
+	images := extractResponsesImages(currentInput)
 	tool := normalizeCodexImageTool(firstResponsesImageGenerationTool(apiReq.Tools), len(images) > 0)
 	payload := codexResponsesPayload{
-		Model:        codexResponsesModel,
-		Instructions: codexResponsesInstructions,
-		Store:        false,
-		Input:        codexImageInput(prompt, images),
-		Tools:        []responses.Tool{tool},
-		ToolChoice:   map[string]string{"type": "image_generation"},
-		Stream:       true,
+		Model:             codexResponsesModel,
+		Instructions:      codexResponsesInstructions,
+		Store:             false,
+		Input:             codexImageInput(prompt, images),
+		Tools:             []responses.Tool{tool},
+		ToolChoice:        map[string]string{"type": "image_generation"},
+		Stream:            true,
+		ParallelToolCalls: false,
 	}
 	resp, accessToken, err := sendCodexResponsesRequest(c, payload)
 	if err != nil {
@@ -180,7 +183,54 @@ func collectCodexResponse(body io.Reader) (map[string]interface{}, error) {
 	if completed == nil {
 		return nil, fmt.Errorf("codex response generation failed")
 	}
+	if image, _ := imageResultFromCompleted(completed); image == "" {
+		if text := strings.TrimSpace(codexResponseText(completed)); text != "" {
+			return nil, fmt.Errorf("codex response completed without image: %s", text)
+		}
+	}
 	return completed, nil
+}
+
+func latestResponsesUserInput(input interface{}) interface{} {
+	items, ok := input.([]interface{})
+	if !ok || len(items) == 0 {
+		return input
+	}
+	for i := len(items) - 1; i >= 0; i-- {
+		item, ok := items[i].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		role := strings.TrimSpace(responseStringValue(item["role"], ""))
+		if role == "user" {
+			return item
+		}
+	}
+	return items[len(items)-1]
+}
+
+func codexResponseText(value interface{}) string {
+	parts := make([]string, 0)
+	collectCodexResponseText(value, &parts)
+	return strings.TrimSpace(strings.Join(parts, ""))
+}
+
+func collectCodexResponseText(value interface{}, parts *[]string) {
+	switch v := value.(type) {
+	case []interface{}:
+		for _, item := range v {
+			collectCodexResponseText(item, parts)
+		}
+	case map[string]interface{}:
+		if responseStringValue(v["type"], "") == "output_text" {
+			if text := responseStringValue(v["text"], ""); text != "" {
+				*parts = append(*parts, text)
+			}
+		}
+		for _, child := range v {
+			collectCodexResponseText(child, parts)
+		}
+	}
 }
 
 func firstResponsesImageGenerationTool(tools []responses.Tool) responses.Tool {

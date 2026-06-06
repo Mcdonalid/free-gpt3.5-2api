@@ -30,6 +30,7 @@ type uploadedImage struct {
 }
 
 func prepareChatVisionInputs(backend *chatgpt_backend.Client, req *chat.Request) error {
+	latestUserIndex := latestUserMessageIndex(req.Messages)
 	for i := range req.Messages {
 		message := &req.Messages[i]
 		if message.Content.ContentType != "multimodal_text" {
@@ -41,6 +42,19 @@ func prepareChatVisionInputs(backend *chatgpt_backend.Client, req *chat.Request)
 			imageValue := chatInputImageValue(part)
 			if imageValue == "" {
 				parts = append(parts, part)
+				continue
+			}
+			if i != latestUserIndex {
+				if text, ok := part.(string); ok && strings.TrimSpace(text) != "" {
+					parts = append(parts, text)
+				}
+				continue
+			}
+			if pointer := existingImageAssetPointer(imageValue); pointer != "" {
+				parts = append(parts, map[string]interface{}{
+					"content_type":  "image_asset_pointer",
+					"asset_pointer": pointer,
+				})
 				continue
 			}
 			if backend.AccAuth == "" {
@@ -77,16 +91,37 @@ func prepareChatVisionInputs(backend *chatgpt_backend.Client, req *chat.Request)
 	return nil
 }
 
+func latestUserMessageIndex(messages []chat.Message) int {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if strings.TrimSpace(messages[i].Author.Role) == "user" {
+			return i
+		}
+	}
+	return len(messages) - 1
+}
+
 func chatInputImageValue(part interface{}) string {
 	item, ok := part.(map[string]interface{})
 	if !ok {
 		return ""
 	}
+	if pointer := existingImageAssetPointer(responseStringValue(item["asset_pointer"], "")); pointer != "" {
+		return pointer
+	}
 	partType := strings.TrimSpace(responseStringValue(item["type"], ""))
-	if partType != "input_image" && partType != "image" && partType != "image_url" && item["image_url"] == nil {
+	contentType := strings.TrimSpace(responseStringValue(item["content_type"], ""))
+	if partType != "input_image" && partType != "image" && partType != "image_url" && contentType != "image_asset_pointer" && item["image_url"] == nil {
 		return ""
 	}
 	return responseImageValue(item)
+}
+
+func existingImageAssetPointer(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.HasPrefix(value, "file-service://") || strings.HasPrefix(value, "sediment://") {
+		return value
+	}
+	return ""
 }
 
 func uploadChatImage(backend *chatgpt_backend.Client, value string, fileName string) (uploadedImage, error) {
