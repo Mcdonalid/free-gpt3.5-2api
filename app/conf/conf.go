@@ -370,14 +370,16 @@ func Init(ctx context.Context) func(context.Context) {
 }
 
 func InitServerless(ctx context.Context) func(context.Context) {
-	wd, _ := os.Getwd()
-	path := filepath.Join(wd, "conf", fmt.Sprintf("app.%s.yaml", env.Curr))
-	data, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		logx.WithContext(ctx).Fatalf("load config failed: %+v", err)
-	}
 	next := defaultGeneratedApp(env.Curr)
-	if err == nil {
+	if path := strings.TrimSpace(os.Getenv("VERCEL_CONFIG_FILE")); path != "" {
+		if !filepath.IsAbs(path) {
+			wd, _ := os.Getwd()
+			path = filepath.Join(wd, path)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			logx.WithContext(ctx).Fatalf("load config failed: %+v", err)
+		}
 		next = defaultApp()
 		if err := yaml.Unmarshal(data, &next); err != nil {
 			logx.WithContext(ctx).Fatalf("parse config failed: %+v", err)

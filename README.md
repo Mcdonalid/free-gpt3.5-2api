@@ -89,7 +89,7 @@ Docker Compose：
 docker compose up -d
 ```
 
-Vercel 运行时不会写入配置文件；如果没有提交 `conf/app.<ENV>.yaml`，请在 Vercel 环境变量中配置：
+Vercel 运行时不会写入配置文件，也不会默认读取仓库里的 `conf/app.dev.yaml`，避免把本地代理或本地账号配置带到云端。请在 Vercel 环境变量中配置：
 
 | 环境变量 | 作用 |
 | --- | --- |
@@ -98,6 +98,7 @@ Vercel 运行时不会写入配置文件；如果没有提交 `conf/app.<ENV>.ya
 | `PROXY` | 可选，全局代理 |
 | `CHATGPT_BASE_URL` | 可选，默认 `https://chatgpt.com` |
 | `LOG_LEVEL` | 可选，默认 `debug` |
+| `VERCEL_CONFIG_FILE` | 可选，显式指定要读取的 YAML 配置文件路径，例如 `conf/app.prod.yaml` |
 
 默认 `compose.yaml` 将容器 `3040` 端口映射到宿主机 `7846`，并映射本地配置与日志目录：
 
