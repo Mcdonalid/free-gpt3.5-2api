@@ -54,17 +54,27 @@ func ConvertToString(id string, model string, chatResp *types.ChatResp, previous
 	if !ok {
 		return ""
 	}
-	apiRespJson := NewApiRespStream(id, model, strings.Replace(text, previousText.Text, "", 1))
+	apiRespJson := NewApiRespStream(id, model, DeltaText(text, previousText.Text))
 	apiRespJson.ConversationId = chatResp.ConversationId
 	apiRespJson.MessageId = chatResp.Message.Id
 	if role {
 		apiRespJson.Choices[0].Delta.Role = chatResp.Message.Author.Role
-	} else if apiRespJson.Choices[0].Delta.Content == "" || (strings.HasPrefix(chatResp.Message.Metadata.ModelSlug, "gpt-4") && apiRespJson.Choices[0].Delta.Content == "【") {
-		return apiRespJson.Choices[0].Delta.Content
+	} else if apiRespJson.Choices[0].Delta.Content == "" {
+		return ""
 	}
 	previousText.Text = text
 	data, _ := json.Marshal(apiRespJson)
 	return "data: " + string(data) + "\n\n"
+}
+
+func DeltaText(text string, previousText string) string {
+	if previousText == "" {
+		return text
+	}
+	if strings.HasPrefix(text, previousText) {
+		return text[len(previousText):]
+	}
+	return text
 }
 
 func StopChunk(id string, model string, finishReason string) ApiRespStream {

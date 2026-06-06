@@ -287,7 +287,7 @@ func handleChatStream(resp *http.Response, onEvent func(chatStreamEvent) error) 
 		if !ok {
 			continue
 		}
-		delta := strings.Replace(text, previousText.Text, "", 1)
+		delta := completions.DeltaText(text, previousText.Text)
 		if !isFirstChunk && delta == "" {
 			continue
 		}
