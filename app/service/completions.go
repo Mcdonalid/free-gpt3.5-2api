@@ -3,10 +3,9 @@ package service
 import (
 	"bufio"
 	"bytes"
-	"chat2api/app/acc_token_pool"
-	"chat2api/app/chat_backend"
 	"chat2api/app/common"
-	"chat2api/app/types"
+	"chat2api/app/token_pool"
+	"chat2api/app/types/chat"
 	"chat2api/app/types/completions"
 	"chat2api/pkg/logx"
 	"encoding/json"
@@ -18,7 +17,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aurorax-neo/tls_client_httpi"
 	"github.com/gin-gonic/gin"
 )
 
@@ -29,47 +27,21 @@ func Completions(c *gin.Context) {
 		common.ErrorResponse(c, http.StatusBadRequest, "Invalid parameter", nil)
 		return
 	}
-	chatReq := chat_backend.BuildChatRequest(apiReq)
+	chatReq := completions.BuildChatRequest(apiReq)
 	if chatReq.Model == "" {
 		errStr := fmt.Sprint("Model is unsupported")
 		logx.WithContext(c.Request.Context()).Error(errStr)
 		common.ErrorResponse(c, http.StatusBadRequest, errStr, nil)
 		return
 	}
-	body, err := common.Struct2BytesBuffer(chatReq)
-	if err != nil {
-		logx.WithContext(c.Request.Context()).Error(err.Error())
-		common.ErrorResponse(c, http.StatusInternalServerError, "", err)
-		return
-	}
-	authToken := c.Request.Header.Get("Authorization")
-	backend, err := chat_backend.New(authToken, chat_backend.Retry())
-	if err != nil {
-		logx.WithContext(c.Request.Context()).Error(err.Error())
-		common.ErrorResponse(c, http.StatusBadGateway, err.Error(), nil)
-		return
-	}
-	headers, cookies := backend.Headers(backend.ChatURL)
-	headers.Set("accept", "text/event-stream")
-	headers.Set("content-type", "application/json")
-	headers.Set("openai-sentinel-chat-requirements-token", backend.Auth.Token)
-	if backend.Auth.ProofWork.Ospt != "" {
-		headers.Set("openai-sentinel-proof-token", backend.Auth.ProofWork.Ospt)
-	}
-	if backend.Auth.TurnstileToken != "" {
-		headers.Set("openai-sentinel-turnstile-token", backend.Auth.TurnstileToken)
-	}
-	if backend.Auth.SoToken != "" {
-		headers.Set("openai-sentinel-so-token", backend.Auth.SoToken)
-	}
-	response, err := backend.HTTP.Request(tls_client_httpi.POST, backend.ChatURL, headers, cookies, body)
+	response, accessToken, err := sendChatRequest(c, chatReq)
 	if err != nil {
 		logx.WithContext(c.Request.Context()).Error(err.Error())
 		common.ErrorResponse(c, http.StatusBadGateway, "upstream request failed", err.Error())
 		return
 	}
 	defer response.Body.Close()
-	if handleResponseError(c, response, backend.AccAuth) {
+	if handleResponseError(c, response, accessToken) {
 		return
 	}
 	result, err := handlerResponse(c, apiReq, response)
@@ -79,7 +51,7 @@ func Completions(c *gin.Context) {
 		return
 	}
 	if !apiReq.Stream {
-		resp := completions.NewApiRespJson(chat_backend.GenerateCompletionID(29), apiReq.Model, result.Content)
+		resp := completions.NewApiRespJson(completions.GenerateCompletionID(29), apiReq.Model, result.Content)
 		resp.ConversationId = result.ConversationId
 		resp.MessageId = result.MessageId
 		c.JSON(http.StatusOK, resp)
@@ -93,7 +65,7 @@ func handleResponseError(c *gin.Context, response *http.Response, accessToken st
 	body, _ := io.ReadAll(io.LimitReader(response.Body, 64*1024))
 	if response.StatusCode == http.StatusTooManyRequests {
 		canUseAt := rateLimitCanUseAt(response, body)
-		acc_token_pool.GetAccAuthPoolInstance().SetCanUseAt(accessToken, canUseAt)
+		token_pool.GetAccessTokenPool().SetCanUseAt(accessToken, canUseAt)
 	}
 	var errorResponse map[string]interface{}
 	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&errorResponse); err != nil {
@@ -227,7 +199,7 @@ type chatResult struct {
 }
 
 type chatStreamEvent struct {
-	Response     types.ChatResp
+	Response     chat.Response
 	Delta        string
 	IsFirstChunk bool
 	Result       *chatResult
@@ -235,7 +207,7 @@ type chatStreamEvent struct {
 
 func handleChatStream(resp *http.Response, onEvent func(chatStreamEvent) error) (*chatResult, error) {
 	reader := bufio.NewReader(resp.Body)
-	var previousText types.StringStruct
+	var previousText chat.StringStruct
 	isFirstChunk := true
 	result := &chatResult{}
 	for {
@@ -256,7 +228,7 @@ func handleChatStream(resp *http.Response, onEvent func(chatStreamEvent) error) 
 		if payload == "[DONE]" {
 			break
 		}
-		var chatResp types.ChatResp
+		var chatResp chat.Response
 		if err := json.Unmarshal([]byte(payload), &chatResp); err != nil {
 			continue
 		}
@@ -317,7 +289,7 @@ func handlerResponse(c *gin.Context, apiReq *completions.ApiReq, resp *http.Resp
 	} else {
 		c.Header("Content-Type", "application/json")
 	}
-	id := chat_backend.GenerateCompletionID(29)
+	id := completions.GenerateCompletionID(29)
 	result, err := handleChatStream(resp, func(event chatStreamEvent) error {
 		if !apiReq.Stream {
 			return nil

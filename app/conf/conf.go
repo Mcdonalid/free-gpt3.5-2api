@@ -1,8 +1,8 @@
 package conf
 
 import (
-	"chat2api/app/acc_token_pool"
 	"chat2api/app/env"
+	"chat2api/app/token_pool"
 	"chat2api/pkg/logx"
 	"context"
 	"crypto/rand"
@@ -195,7 +195,7 @@ func normalizeConfig(cfg *app) {
 	for i, token := range cfg.Auth.AccessTokens {
 		cfg.Auth.AccessTokens[i] = normalizeAuthToken(token)
 	}
-	pool := acc_token_pool.GetAccAuthPoolInstance()
+	pool := token_pool.GetAccessTokenPool()
 	pool.Reset()
 	for _, account := range cfg.ChatGPTs {
 		token := strings.TrimSpace(account.AccessToken)
@@ -203,7 +203,7 @@ func normalizeConfig(cfg *app) {
 		if token == "" {
 			continue
 		}
-		pool.AddAccessToken(&acc_token_pool.AccessToken{
+		pool.AddAccessToken(&token_pool.AccessToken{
 			Token:     "Bearer " + token,
 			ExpiresAt: time.Now().Add(24 * time.Hour).Unix(),
 			Proxy:     strings.TrimSpace(account.Proxy),

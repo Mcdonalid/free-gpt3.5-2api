@@ -1,4 +1,4 @@
-package acc_token_pool
+package token_pool
 
 import (
 	"chat2api/app/common"
@@ -23,16 +23,16 @@ type AccessToken struct {
 	CanUseAt  int64  `yaml:"-"`
 }
 
-func newAccAuthPool() *AccessTokenPool {
+func newAccessTokenPool() *AccessTokenPool {
 	return &AccessTokenPool{
 		AccessTokens: make([]*AccessToken, 0),
 		index:        -1,
 	}
 }
 
-func GetAccAuthPoolInstance() *AccessTokenPool {
+func GetAccessTokenPool() *AccessTokenPool {
 	once.Do(func() {
-		instance = newAccAuthPool()
+		instance = newAccessTokenPool()
 	})
 	return instance
 }
@@ -87,7 +87,6 @@ func (a *AccessTokenPool) GetToken() string {
 	return accessToken.Token
 }
 
-// GetAccessToken 使用迭代方式选取可用 token，避免高并发下递归导致的栈溢出
 func (a *AccessTokenPool) GetAccessToken() *AccessToken {
 	a.mu.Lock()
 	defer a.mu.Unlock()
