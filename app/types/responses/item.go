@@ -1,17 +1,29 @@
 package responses
 
 type OutputItem struct {
-	ID      string        `json:"id"`
-	Type    string        `json:"type"`
-	Status  string        `json:"status"`
-	Role    string        `json:"role"`
-	Content []ContentPart `json:"content"`
+	ID            string        `json:"id"`
+	Type          string        `json:"type"`
+	Status        string        `json:"status"`
+	Role          string        `json:"role,omitempty"`
+	Content       []ContentPart `json:"content,omitempty"`
+	Result        string        `json:"result,omitempty"`
+	RevisedPrompt string        `json:"revised_prompt,omitempty"`
 }
 
 type ContentPart struct {
 	Type        string        `json:"type"`
 	Text        string        `json:"text"`
 	Annotations []interface{} `json:"annotations"`
+}
+
+func ImageOutputItem(id string, result string, prompt string) OutputItem {
+	return OutputItem{
+		ID:            id,
+		Type:          "image_generation_call",
+		Status:        "completed",
+		Result:        result,
+		RevisedPrompt: prompt,
+	}
 }
 
 func TextOutputItem(id string, text string, status string) OutputItem {

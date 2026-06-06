@@ -28,20 +28,38 @@ func completionMessagesFromResponseInput(input interface{}) []completions.ApiMes
 		}
 		return []completions.ApiMessage{{Role: "user", Content: strings.TrimSpace(v)}}
 	case map[string]interface{}:
-		return []completions.ApiMessage{{Role: responseStringValue(v["role"], "user"), Content: responseMessageContentText(v)}}
+		return []completions.ApiMessage{{Role: responseStringValue(v["role"], "user"), Content: responseMessageContent(v)}}
 	case []interface{}:
 		messages := make([]completions.ApiMessage, 0, len(v))
 		for _, item := range v {
 			if part, ok := item.(map[string]interface{}); ok {
-				text := responseMessageContentText(part)
-				if strings.TrimSpace(text) != "" {
-					messages = append(messages, completions.ApiMessage{Role: responseStringValue(part["role"], "user"), Content: text})
+				content := responseMessageContent(part)
+				if responseContentHasValue(content) {
+					messages = append(messages, completions.ApiMessage{Role: responseStringValue(part["role"], "user"), Content: content})
 				}
 			}
 		}
 		return messages
 	default:
 		return nil
+	}
+}
+
+func responseMessageContent(item map[string]interface{}) interface{} {
+	if content, ok := item["content"].([]interface{}); ok {
+		return content
+	}
+	return responseMessageContentText(item)
+}
+
+func responseContentHasValue(content interface{}) bool {
+	switch v := content.(type) {
+	case string:
+		return strings.TrimSpace(v) != ""
+	case []interface{}:
+		return len(v) > 0
+	default:
+		return v != nil
 	}
 }
 
@@ -79,13 +97,28 @@ func isResponsesContentPart(item map[string]interface{}) bool {
 	}
 }
 
-func hasResponsesImageGenerationTool(tools []responses.Tool) bool {
+func hasResponsesImageGenerationTool(req *responses.ApiReq) bool {
+	if responseToolChoiceType(req.ToolChoice) == "image_generation" {
+		return true
+	}
+	tools := req.Tools
 	for _, tool := range tools {
 		if strings.TrimSpace(tool.Type) == "image_generation" {
 			return true
 		}
 	}
 	return false
+}
+
+func responseToolChoiceType(value interface{}) string {
+	switch v := value.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case map[string]interface{}:
+		return strings.TrimSpace(responseStringValue(v["type"], ""))
+	default:
+		return ""
+	}
 }
 
 func hasResponsesNonImageTools(tools []responses.Tool) bool {

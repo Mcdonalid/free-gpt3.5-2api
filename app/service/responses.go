@@ -17,8 +17,11 @@ func Responses(c *gin.Context) {
 		common.ErrorResponse(c, http.StatusBadRequest, "Invalid parameter", nil)
 		return
 	}
-	if hasResponsesImageGenerationTool(apiReq.Tools) {
-		common.ErrorResponse(c, http.StatusNotImplemented, "responses image_generation tool is not implemented", nil)
+	if hasResponsesImageGenerationTool(apiReq) {
+		if err := runCodexImageResponses(c, apiReq); err != nil {
+			logx.WithContext(c.Request.Context()).Error(err.Error())
+			common.ErrorResponse(c, http.StatusBadGateway, "codex responses request failed", err.Error())
+		}
 		return
 	}
 	compReq := &completions.ApiReq{

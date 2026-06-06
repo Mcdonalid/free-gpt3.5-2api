@@ -5,14 +5,24 @@ type Author struct {
 }
 
 type Content struct {
-	ContentType string   `json:"content_type"`
-	Parts       []string `json:"parts"`
+	ContentType string        `json:"content_type"`
+	Parts       []interface{} `json:"parts"`
+}
+
+type Attachment struct {
+	ID       string `json:"id"`
+	MimeType string `json:"mimeType"`
+	Name     string `json:"name"`
+	Size     int    `json:"size"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
 }
 
 type Message struct {
-	Id      string  `json:"id"`
-	Author  Author  `json:"author"`
-	Content Content `json:"content"`
+	Id       string                 `json:"id"`
+	Author   Author                 `json:"author"`
+	Content  Content                `json:"content"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
 }
 
 type ConversationMode struct {

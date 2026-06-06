@@ -12,13 +12,16 @@ import (
 )
 
 func sendChatRequest(c *gin.Context, chatReq *chat.Request) (*http.Response, string, error) {
-	body, err := common.Struct2BytesBuffer(chatReq)
-	if err != nil {
-		return nil, "", err
-	}
 	backend, err := chatgpt_backend.New(c.Request.Header.Get("Authorization"), chatgpt_backend.Retry())
 	if err != nil {
 		return nil, "", err
+	}
+	if err := prepareChatVisionInputs(backend, chatReq); err != nil {
+		return nil, backend.AccAuth, err
+	}
+	body, err := common.Struct2BytesBuffer(chatReq)
+	if err != nil {
+		return nil, backend.AccAuth, err
 	}
 	headers, cookies := backend.Headers(backend.ChatURL)
 	headers.Set("accept", "text/event-stream")
