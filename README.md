@@ -1,5 +1,7 @@
 # chat2api
 
+秽土转生 `free-gpt3.5-2api` -> `chat2api`.
+
 把 ChatGPT Web 侧能力转换为兼容 OpenAI 风格的 HTTP API。
 
 ## 支持能力
