@@ -17,7 +17,8 @@ func runResponsesTextChat(c *gin.Context, apiReq *completions.ApiReq, streamResp
 		return nil, nil
 	}
 	if streamResponses {
-		return streamResponsesTextEvents(c, apiReq.Model, resp)
+		_, err := streamResponsesTextEvents(c, apiReq.Model, resp)
+		return nil, err
 	}
 	return handlerResponse(c, apiReq, resp)
 }

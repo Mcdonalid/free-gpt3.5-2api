@@ -171,6 +171,8 @@ func uploadChatImage(backend *chatgpt_backend.Client, value string, fileName str
 	putHeaders.Set("origin", backend.BaseURL)
 	putHeaders.Set("referer", backend.BaseURL+"/")
 	putHeaders.Set("user-agent", backend.UserAgent)
+	putHeaders.Set("accept", "application/json, text/plain, */*")
+	putHeaders.Set("accept-language", "en-US,en;q=0.8")
 	putResp, err := backend.HTTP.Request(tls_client_httpi.PUT, meta.UploadURL, putHeaders, nil, bytes.NewReader(data))
 	if err != nil {
 		return uploadedImage{}, err

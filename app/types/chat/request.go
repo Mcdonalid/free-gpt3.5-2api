@@ -56,6 +56,7 @@ type Request struct {
 	ClientContextualInfo             ClientContextualInfo `json:"client_contextual_info"`
 	ParagenCotSummaryDisplayOverride string               `json:"paragen_cot_summary_display_override,omitempty"`
 	ForceParallelSwitch              string               `json:"force_parallel_switch,omitempty"`
+	ThinkingEffort                   string               `json:"thinking_effort,omitempty"`
 }
 
 type ClientContextualInfo struct {

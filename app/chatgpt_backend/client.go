@@ -148,6 +148,17 @@ func (c *Client) Headers(url string) (tls_client_httpi.Headers, tls_client_httpi
 	return headers, c.Cookies
 }
 
+func (c *Client) IsAuthenticated() bool {
+	return c.AccAuth != ""
+}
+
+func (c *Client) ChatTimezone() (string, int) {
+	if c.IsAuthenticated() {
+		return "Asia/Shanghai", -480
+	}
+	return "America/Los_Angeles", 480
+}
+
 func (c *Client) loadPowResources() {
 	headers, cookies := c.Headers(c.BaseURL + "/")
 	headers.Set("accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")

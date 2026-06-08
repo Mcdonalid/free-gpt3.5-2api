@@ -228,15 +228,14 @@ func handleChatStream(resp *http.Response, onEvent func(chatStreamEvent) error) 
 		if payload == "[DONE]" {
 			break
 		}
+		var rawEvent map[string]interface{}
+		_ = json.Unmarshal([]byte(payload), &rawEvent)
 		var chatResp chat.Response
 		if err := json.Unmarshal([]byte(payload), &chatResp); err != nil {
 			continue
 		}
 		if chatResp.Error != nil {
 			return nil, fmt.Errorf("chatgpt error: %v", chatResp.Error)
-		}
-		if chatResp.Message.Author.Role != "assistant" || chatResp.Message.Content.Parts == nil {
-			continue
 		}
 		if chatResp.ConversationId != "" {
 			result.ConversationId = chatResp.ConversationId
@@ -249,14 +248,14 @@ func handleChatStream(resp *http.Response, onEvent func(chatStreamEvent) error) 
 			chatResp.Message.Metadata.MessageType != "continue" {
 			continue
 		}
-		if chatResp.Message.Content.ContentType != "" && !strings.HasSuffix(chatResp.Message.Content.ContentType, "text") {
-			continue
+		text := chatResponseText(chatResp)
+		if text == "" {
+			text = assistantRawText(rawEvent, previousText.Text)
+			if text != "" && chatResp.Message.Author.Role == "" {
+				chatResp.Message.Author.Role = "assistant"
+			}
 		}
-		if len(chatResp.Message.Content.Parts) == 0 {
-			continue
-		}
-		text, ok := chatResp.Message.Content.Parts[0].(string)
-		if !ok {
+		if text == "" {
 			continue
 		}
 		delta := completions.DeltaText(text, previousText.Text)
@@ -281,6 +280,172 @@ func handleChatStream(resp *http.Response, onEvent func(chatStreamEvent) error) 
 	}
 	result.Content = previousText.Text
 	return result, nil
+}
+
+func chatResponseText(chatResp chat.Response) string {
+	if chatResp.Message.Author.Role != "assistant" {
+		return ""
+	}
+	if text := strings.TrimSpace(chatResp.Message.Content.Text); text != "" {
+		return text
+	}
+	if chatResp.Message.Content.ContentType != "" && !strings.Contains(chatResp.Message.Content.ContentType, "text") {
+		return ""
+	}
+	parts := make([]string, 0)
+	for _, part := range chatResp.Message.Content.Parts {
+		switch v := part.(type) {
+		case string:
+			parts = append(parts, v)
+		case map[string]interface{}:
+			if text := strings.TrimSpace(responseStringValue(v["text"], "")); text != "" {
+				parts = append(parts, text)
+			}
+		}
+	}
+	return strings.TrimSpace(strings.Join(parts, ""))
+}
+
+func assistantRawText(event map[string]interface{}, currentText string) string {
+	if len(event) == 0 {
+		return ""
+	}
+	if text := assistantTextFromMessageMap(responseMapValue(event["message"])); text != "" {
+		return text
+	}
+	vMap := responseMapValue(event["v"])
+	if text := assistantTextFromMessageMap(responseMapValue(vMap["message"])); text != "" {
+		return text
+	}
+	if text, ok := applyAssistantTextPatch(event, currentText); ok {
+		return text
+	}
+	return ""
+}
+
+func assistantTextFromMessageMap(message map[string]interface{}) string {
+	if len(message) == 0 {
+		return ""
+	}
+	if author := responseMapValue(message["author"]); len(author) > 0 {
+		if role := strings.TrimSpace(responseStringValue(author["role"], "")); role != "" && role != "assistant" {
+			return ""
+		}
+	}
+	content := responseMapValue(message["content"])
+	if len(content) == 0 {
+		return ""
+	}
+	if text := strings.TrimSpace(responseStringValue(content["text"], "")); text != "" {
+		return text
+	}
+	contentType := strings.TrimSpace(responseStringValue(content["content_type"], ""))
+	if contentType != "" && !strings.Contains(contentType, "text") {
+		return ""
+	}
+	return strings.TrimSpace(textFromContentParts(content["parts"]))
+}
+
+func textFromContentParts(value interface{}) string {
+	parts, ok := value.([]interface{})
+	if !ok {
+		return ""
+	}
+	texts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		switch v := part.(type) {
+		case string:
+			texts = append(texts, v)
+		case map[string]interface{}:
+			if text := responseStringValue(v["text"], ""); text != "" {
+				texts = append(texts, text)
+			}
+		}
+	}
+	return strings.Join(texts, "")
+}
+
+func applyAssistantTextPatch(event map[string]interface{}, currentText string) (string, bool) {
+	path := responseStringValue(event["p"], responseStringValue(event["path"], ""))
+	if path != "" && !isAssistantTextPath(path) && !strings.HasPrefix(path, "/message/content/parts/0/") {
+		return "", false
+	}
+	op := responseStringValue(event["o"], responseStringValue(event["op"], ""))
+	if op == "patch" {
+		return applyAssistantTextPatchOps(event["v"], currentText)
+	}
+	if op == "append" || op == "add" {
+		return currentText + patchTextValue(event["v"]), true
+	}
+	if op == "replace" {
+		return patchTextValue(event["v"]), true
+	}
+	if value, ok := event["v"].(string); ok && value != "" && isAssistantTextPath(path) {
+		return currentText + value, true
+	}
+	return "", false
+}
+
+func applyAssistantTextPatchOps(value interface{}, currentText string) (string, bool) {
+	ops, ok := value.([]interface{})
+	if !ok {
+		return "", false
+	}
+	text := currentText
+	applied := false
+	for _, item := range ops {
+		opMap := responseMapValue(item)
+		if len(opMap) == 0 {
+			continue
+		}
+		path := responseStringValue(opMap["p"], responseStringValue(opMap["path"], ""))
+		if path != "" && !isAssistantTextPath(path) && !strings.HasPrefix(path, "/message/content/parts/0/") {
+			continue
+		}
+		op := responseStringValue(opMap["o"], responseStringValue(opMap["op"], ""))
+		switch op {
+		case "patch":
+			next, ok := applyAssistantTextPatchOps(opMap["v"], text)
+			if ok {
+				text = next
+				applied = true
+			}
+		case "append", "add":
+			text += patchTextValue(opMap["v"])
+			applied = true
+		case "replace":
+			text = patchTextValue(opMap["v"])
+			applied = true
+		}
+	}
+	return text, applied
+}
+
+func isAssistantTextPath(path string) bool {
+	return path == "" || path == "/message/content/parts/0" || path == "/message/content/text"
+}
+
+func patchTextValue(value interface{}) string {
+	switch v := value.(type) {
+	case string:
+		return v
+	case map[string]interface{}:
+		if text := responseStringValue(v["text"], ""); text != "" {
+			return text
+		}
+		return textFromContentParts(v["parts"])
+	case []interface{}:
+		return textFromContentParts(v)
+	default:
+		return ""
+	}
+}
+
+func responseMapValue(value interface{}) map[string]interface{} {
+	if v, ok := value.(map[string]interface{}); ok {
+		return v
+	}
+	return nil
 }
 
 func handlerResponse(c *gin.Context, apiReq *completions.ApiReq, resp *http.Response) (*chatResult, error) {

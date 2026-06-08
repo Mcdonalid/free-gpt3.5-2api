@@ -43,5 +43,8 @@ func CompletedEvent(responseID string, model string, created int64, output []Out
 
 func SSE(event Event) string {
 	data, _ := json.Marshal(event)
-	return "data: " + string(data) + "\n\n"
+	if event.Type == "" {
+		return "data: " + string(data) + "\n\n"
+	}
+	return "event: " + event.Type + "\ndata: " + string(data) + "\n\n"
 }

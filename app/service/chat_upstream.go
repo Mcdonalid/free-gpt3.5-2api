@@ -24,8 +24,9 @@ func sendChatRequest(c *gin.Context, chatReq *chat.Request) (*http.Response, str
 	if err := prepareChatVisionInputs(backend, chatReq); err != nil {
 		return nil, backend.AccAuth, err
 	}
+	applyChatTargetDefaults(backend, chatReq)
 	upstreamURL := backend.ChatURL
-	if shouldUseFConversation(backend, chatReq) {
+	if shouldUseFConversation(backend) {
 		upstreamURL = backend.BaseURL + "/backend-api/f/conversation"
 		applyFConversationPayloadDefaults(chatReq)
 	}
@@ -40,16 +41,7 @@ func sendChatRequest(c *gin.Context, chatReq *chat.Request) (*http.Response, str
 	headers, cookies := backend.Headers(upstreamURL)
 	headers.Set("accept", "text/event-stream")
 	headers.Set("content-type", "application/json")
-	headers.Set("openai-sentinel-chat-requirements-token", backend.Auth.Token)
-	if backend.Auth.ProofWork.Ospt != "" {
-		headers.Set("openai-sentinel-proof-token", backend.Auth.ProofWork.Ospt)
-	}
-	if backend.Auth.TurnstileToken != "" {
-		headers.Set("openai-sentinel-turnstile-token", backend.Auth.TurnstileToken)
-	}
-	if backend.Auth.SoToken != "" {
-		headers.Set("openai-sentinel-so-token", backend.Auth.SoToken)
-	}
+	applySentinelHeaders(headers, backend, true)
 	if conduitToken != "" {
 		headers.Set("x-conduit-token", conduitToken)
 	}
@@ -60,26 +52,14 @@ func sendChatRequest(c *gin.Context, chatReq *chat.Request) (*http.Response, str
 	return response, backend.AccAuth, nil
 }
 
-func shouldUseFConversation(backend *chatgpt_backend.Client, chatReq *chat.Request) bool {
-	if backend.AccAuth == "" {
-		return false
-	}
-	for _, hint := range chatReq.SystemHints {
-		if strings.TrimSpace(hint) == "picture_v2" {
-			return true
-		}
-	}
-	for _, message := range chatReq.Messages {
-		if len(message.Metadata) > 0 {
-			if _, ok := message.Metadata["attachments"]; ok {
-				return true
-			}
-		}
-		if messageHasAssetPointer(message) {
-			return true
-		}
-	}
-	return false
+func applyChatTargetDefaults(backend *chatgpt_backend.Client, chatReq *chat.Request) {
+	timezone, offset := backend.ChatTimezone()
+	chatReq.Timezone = timezone
+	chatReq.TimeZoneOffsetMin = offset
+}
+
+func shouldUseFConversation(backend *chatgpt_backend.Client) bool {
+	return backend.AccAuth != ""
 }
 
 func messageHasAssetPointer(message chat.Message) bool {
@@ -106,8 +86,10 @@ func applyFConversationPayloadDefaults(chatReq *chat.Request) {
 	chatReq.EnableMessageFollowups = true
 	chatReq.SupportsBuffering = true
 	chatReq.SupportedEncodings = []string{"v1"}
+	chatReq.HistoryAndTrainingDisabled = false
 	chatReq.ParagenCotSummaryDisplayOverride = "allow"
 	chatReq.ForceParallelSwitch = "auto"
+	chatReq.ThinkingEffort = "standard"
 	chatReq.ClientContextualInfo = chat.ClientContextualInfo{
 		IsDarkMode:      false,
 		TimeSinceLoaded: 1200,
@@ -139,6 +121,7 @@ func prepareFConversation(backend *chatgpt_backend.Client, upstreamURL string, c
 		"supports_buffering":     true,
 		"supported_encodings":    []string{"v1"},
 		"client_contextual_info": map[string]interface{}{"app_name": "chatgpt.com"},
+		"thinking_effort":        "standard",
 	}
 	if mimeTypes := attachmentMimeTypes(chatReq); len(mimeTypes) > 0 {
 		payload["attachment_mime_types"] = mimeTypes
@@ -150,16 +133,7 @@ func prepareFConversation(backend *chatgpt_backend.Client, upstreamURL string, c
 	headers, cookies := backend.Headers(backend.BaseURL + path)
 	headers.Set("accept", "application/json")
 	headers.Set("content-type", "application/json")
-	headers.Set("openai-sentinel-chat-requirements-token", backend.Auth.Token)
-	if backend.Auth.ProofWork.Ospt != "" {
-		headers.Set("openai-sentinel-proof-token", backend.Auth.ProofWork.Ospt)
-	}
-	if backend.Auth.TurnstileToken != "" {
-		headers.Set("openai-sentinel-turnstile-token", backend.Auth.TurnstileToken)
-	}
-	if backend.Auth.SoToken != "" {
-		headers.Set("openai-sentinel-so-token", backend.Auth.SoToken)
-	}
+	applySentinelHeaders(headers, backend, false)
 	resp, err := backend.HTTP.Request(tls_client_httpi.POST, backend.BaseURL+path, headers, cookies, bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("prepare f conversation failed: %w", err)
@@ -176,6 +150,22 @@ func prepareFConversation(backend *chatgpt_backend.Client, upstreamURL string, c
 		return "", err
 	}
 	return strings.TrimSpace(result.ConduitToken), nil
+}
+
+func applySentinelHeaders(headers tls_client_httpi.Headers, backend *chatgpt_backend.Client, includeTurnTrace bool) {
+	headers.Set("openai-sentinel-chat-requirements-token", backend.Auth.Token)
+	if backend.Auth.ProofWork.Ospt != "" {
+		headers.Set("openai-sentinel-proof-token", backend.Auth.ProofWork.Ospt)
+	}
+	if backend.Auth.TurnstileToken != "" {
+		headers.Set("openai-sentinel-turnstile-token", backend.Auth.TurnstileToken)
+	}
+	if backend.Auth.SoToken != "" {
+		headers.Set("openai-sentinel-so-token", backend.Auth.SoToken)
+	}
+	if includeTurnTrace {
+		headers.Set("x-oai-turn-trace-id", uuid.New().String())
+	}
 }
 
 func partialQueryFromChatRequest(chatReq *chat.Request) map[string]interface{} {

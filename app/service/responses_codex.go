@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/aurorax-neo/tls_client_httpi"
 	"github.com/gin-gonic/gin"
@@ -54,21 +55,84 @@ func runCodexImageResponses(c *gin.Context, apiReq *responses.ApiReq) error {
 	}
 	resp, accessToken, err := sendCodexResponsesRequest(c, payload)
 	if err != nil {
-		return err
+		return runConversationImageResponses(c, apiReq, prompt, images, tool)
 	}
 	defer resp.Body.Close()
-	if handleResponseError(c, resp, accessToken) {
-		return nil
+	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			return runConversationImageResponses(c, apiReq, prompt, images, tool)
+		}
+		if handleResponseError(c, resp, accessToken) {
+			return nil
+		}
 	}
 	if apiReq.Stream {
 		return streamCodexResponses(c, resp)
 	}
 	completed, err := collectCodexResponse(resp.Body)
 	if err != nil {
-		return err
+		return runConversationImageResponses(c, apiReq, prompt, images, tool)
 	}
 	c.JSON(http.StatusOK, completed)
 	return nil
+}
+
+func runConversationImageResponses(c *gin.Context, apiReq *responses.ApiReq, prompt string, images []string, tool responses.Tool) error {
+	completed, err := collectConversationImageResponse(c, prompt, images, tool)
+	if err != nil {
+		return err
+	}
+	output := responsesOutputFromCompleted(completed, prompt)
+	responseID := responses.ResponseID()
+	created := time.Now().Unix()
+	model := responses.NormalizeModel(apiReq.Model)
+	if apiReq.Stream {
+		c.Header("Content-Type", "text/event-stream")
+		createdEvent := responses.CreatedEvent(responseID, model, created)
+		if _, err := c.Writer.WriteString(responses.SSE(createdEvent)); err != nil {
+			return err
+		}
+		for index, item := range output {
+			addedItem := item
+			if _, err := c.Writer.WriteString(responses.SSE(responses.Event{Type: "response.output_item.added", OutputIndex: index, Item: &addedItem})); err != nil {
+				return err
+			}
+			if _, err := c.Writer.WriteString(responses.SSE(responses.Event{Type: "response.output_item.done", OutputIndex: index, Item: &addedItem})); err != nil {
+				return err
+			}
+		}
+		if _, err := c.Writer.WriteString(responses.SSE(responses.CompletedEvent(responseID, model, created, output))); err != nil {
+			return err
+		}
+		_, _ = c.Writer.WriteString("data: [DONE]\n\n")
+		c.Writer.Flush()
+		return nil
+	}
+	c.JSON(http.StatusOK, responses.CompletedEvent(responseID, model, created, output).Response)
+	return nil
+}
+
+func responsesOutputFromCompleted(completed map[string]interface{}, prompt string) []responses.OutputItem {
+	output := make([]responses.OutputItem, 0)
+	rawOutput, _ := completed["output"].([]interface{})
+	for _, raw := range rawOutput {
+		itemMap := responseMapValue(raw)
+		if b64, revised := imageResultFromCompleted(itemMap); b64 != "" {
+			if revised == "" {
+				revised = prompt
+			}
+			output = append(output, responses.ImageOutputItem(responses.MessageID(), b64, revised))
+		}
+	}
+	if len(output) == 0 {
+		if b64, revised := imageResultFromCompleted(completed); b64 != "" {
+			if revised == "" {
+				revised = prompt
+			}
+			output = append(output, responses.ImageOutputItem(responses.MessageID(), b64, revised))
+		}
+	}
+	return output
 }
 
 func sendCodexResponsesRequest(c *gin.Context, payload codexResponsesPayload) (*http.Response, string, error) {
@@ -82,7 +146,6 @@ func sendCodexResponsesRequest(c *gin.Context, payload codexResponsesPayload) (*
 	}
 	url := backend.BaseURL + "/backend-api/codex/responses"
 	headers, cookies := backend.Headers(url)
-	headers.Set("accept", "text/event-stream")
 	headers.Set("content-type", "application/json")
 	if backend.AccAuth == "" {
 		return nil, backend.AccAuth, fmt.Errorf("codex responses endpoint requires access token auth")

@@ -35,4 +35,4 @@ go.work
 conf/**
 !/conf/app.demo.yaml
 chatgpt2api/**
-
+aurora
