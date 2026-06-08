@@ -34,5 +34,5 @@ go.work
 /CHANGELOG.md
 conf/**
 !/conf/app.demo.yaml
-chatgpt2api/**
+chatgpt2api
 aurora
