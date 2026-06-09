@@ -30,8 +30,9 @@ func NewToolCallsApiRespStream(id string, model string, toolCalls []ToolCall) *A
 		Choices: []ApiStreamChoice{
 			{
 				Delta: ApiStreamDelta{
-					Role:      "assistant",
-					ToolCalls: toolCalls,
+					Role:               "assistant",
+					ToolCalls:          toolCalls,
+					IncludeNullContent: true,
 				},
 				Index:        0,
 				FinishReason: nil,

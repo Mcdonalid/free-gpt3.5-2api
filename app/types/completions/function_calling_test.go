@@ -1,6 +1,7 @@
 package completions
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -82,6 +83,43 @@ func TestPreprocessMessagesConvertsToolResults(t *testing.T) {
 	}
 }
 
+func TestMessagesNeedPreprocessDetectsToolRoleWithoutTools(t *testing.T) {
+	messages := []ApiMessage{
+		{
+			Role: "assistant",
+			ToolCalls: []ToolCall{{
+				ID:   "call_1",
+				Type: "function",
+				Function: ToolCallFunction{
+					Name:      "search",
+					Arguments: `{"query":"go"}`,
+				},
+			}},
+		},
+		{Role: "tool", ToolCallID: "call_1", Content: "result text"},
+	}
+	if !MessagesNeedPreprocess(messages) {
+		t.Fatal("tool role should require preprocessing even when request has no tools")
+	}
+	processed, err := PreprocessMessages(messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed[1].Role != "user" {
+		t.Fatalf("tool role leaked through preprocessing: %s", processed[1].Role)
+	}
+	if !strings.Contains(processed[1].Content.(string), "Tool name: search") {
+		t.Fatalf("missing tool result context: %s", processed[1].Content)
+	}
+}
+
+func TestPreprocessMessagesRejectsUnknownToolCallIDLikeToolify(t *testing.T) {
+	messages := []ApiMessage{{Role: "tool", ToolCallID: "call_1", Content: "result text"}}
+	if _, err := PreprocessMessages(messages); err == nil {
+		t.Fatal("expected unknown tool_call_id to be rejected")
+	}
+}
+
 func TestBuildFunctionPromptValidatesToolChoice(t *testing.T) {
 	tools := []Tool{{
 		Type: "function",
@@ -124,4 +162,46 @@ func TestStreamToolDetectorHoldsPartialTrigger(t *testing.T) {
 	if detector.State() != "tool_parsing" {
 		t.Fatalf("unexpected state: %s", detector.State())
 	}
+}
+
+func TestToolCallFunctionAcceptsObjectArguments(t *testing.T) {
+	var message ApiMessage
+	err := json.Unmarshal([]byte(`{
+		"role":"assistant",
+		"tool_calls":[{
+			"id":"call_1",
+			"type":"function",
+			"function":{
+				"name":"search",
+				"arguments":{"query":"go","limit":2}
+			}
+		}]
+	}`), &message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := message.ToolCalls[0].Function.Arguments
+	if !strings.Contains(args, `"query":"go"`) || !strings.Contains(args, `"limit":2`) {
+		t.Fatalf("arguments object was not normalized to JSON: %s", args)
+	}
+}
+
+func TestToolCallsStreamChunkIncludesExplicitNullContent(t *testing.T) {
+	chunk := NewToolCallsApiRespStream("chatcmpl_test", "auto", []ToolCall{{
+		Index: intPtr(0),
+		ID:    "call_1",
+		Type:  "function",
+		Function: ToolCallFunction{
+			Name:      "search",
+			Arguments: `{"query":"go"}`,
+		},
+	}})
+	data := chunk.String()
+	if !strings.Contains(data, `"content":null`) {
+		t.Fatalf("tool call stream delta should include content:null, got %s", data)
+	}
+}
+
+func intPtr(value int) *int {
+	return &value
 }

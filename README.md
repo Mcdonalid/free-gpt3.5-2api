@@ -249,7 +249,9 @@ curl http://127.0.0.1:3040/v1/chat/completions \
 }
 ```
 
-客户端执行工具后，把工具结果带回下一轮即可让模型继续生成最终回答：
+客户端执行工具后，把工具结果带回下一轮即可让模型继续生成最终回答。第二轮可以继续带 `tools`，也可以只带消息历史；服务会把 `assistant.tool_calls` 和 `role=tool` 转成 ChatGPT Web 侧可理解的普通上下文文本再发给上游。
+
+注意：与 Toolify 保持一致，`role=tool` 必须带 `tool_call_id`，并且消息历史里必须包含对应的上一轮 `assistant.tool_calls`；否则会返回 400，避免工具结果失去工具名和参数上下文。
 
 ```bash
 curl http://127.0.0.1:3040/v1/chat/completions \

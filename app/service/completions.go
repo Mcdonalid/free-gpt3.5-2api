@@ -70,18 +70,22 @@ func Completions(c *gin.Context) {
 
 func prepareFunctionCallingRequest(apiReq *completions.ApiReq) error {
 	completions.NormalizeLegacyFunctions(apiReq)
-	if !completions.HasTools(apiReq) {
-		return nil
+	hasTools := completions.HasTools(apiReq)
+	if completions.MessagesNeedPreprocess(apiReq.Messages) {
+		processed, err := completions.PreprocessMessages(apiReq.Messages)
+		if err != nil {
+			return err
+		}
+		apiReq.Messages = processed
 	}
-	processed, err := completions.PreprocessMessages(apiReq.Messages)
-	if err != nil {
-		return err
+	if !hasTools {
+		return nil
 	}
 	prompt, err := completions.BuildFunctionPrompt(apiReq.Tools, apiReq.ToolChoice)
 	if err != nil {
 		return err
 	}
-	apiReq.Messages = append([]completions.ApiMessage{{Role: "system", Content: prompt}}, processed...)
+	apiReq.Messages = append([]completions.ApiMessage{{Role: "system", Content: prompt}}, apiReq.Messages...)
 	return nil
 }
 

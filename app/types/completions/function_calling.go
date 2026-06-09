@@ -144,6 +144,19 @@ func HasTools(apiReq *ApiReq) bool {
 	return false
 }
 
+func MessagesNeedPreprocess(messages []ApiMessage) bool {
+	for _, message := range messages {
+		switch strings.TrimSpace(message.Role) {
+		case "tool", "function", "developer":
+			return true
+		}
+		if len(message.ToolCalls) > 0 || message.FunctionCall != nil {
+			return true
+		}
+	}
+	return false
+}
+
 func BuildFunctionPrompt(tools []Tool, toolChoice interface{}) (string, error) {
 	toolList, err := buildToolsList(tools)
 	if err != nil {
@@ -170,9 +183,12 @@ func PreprocessMessages(messages []ApiMessage) ([]ApiMessage, error) {
 			if strings.TrimSpace(message.ToolCallID) == "" {
 				return nil, fmt.Errorf("tool message missing tool_call_id")
 			}
+			if message.Content == nil {
+				return nil, fmt.Errorf("tool message missing content for tool_call_id=%s", message.ToolCallID)
+			}
 			toolInfo, ok := index[message.ToolCallID]
 			if !ok {
-				return nil, fmt.Errorf("tool_call_id=%s not found in conversation history", message.ToolCallID)
+				return nil, fmt.Errorf("tool_call_id=%s not found in conversation history. Ensure the assistant message with this tool_call is included in the messages array", message.ToolCallID)
 			}
 			processed = append(processed, ApiMessage{
 				Role:    "user",

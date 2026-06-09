@@ -1,5 +1,7 @@
 package completions
 
+import "encoding/json"
+
 type ToolFunction struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description,omitempty"`
@@ -24,6 +26,19 @@ type ToolCallFunction struct {
 	Arguments string `json:"arguments,omitempty"`
 }
 
+func (f *ToolCallFunction) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Name      string      `json:"name"`
+		Arguments interface{} `json:"arguments"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	f.Name = raw.Name
+	f.Arguments = normalizeFunctionArguments(raw.Arguments)
+	return nil
+}
+
 type ToolCall struct {
 	Index    *int             `json:"index,omitempty"`
 	ID       string           `json:"id,omitempty"`
@@ -34,6 +49,34 @@ type ToolCall struct {
 type FunctionCall struct {
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
+}
+
+func (f *FunctionCall) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Name      string      `json:"name"`
+		Arguments interface{} `json:"arguments"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	f.Name = raw.Name
+	f.Arguments = normalizeFunctionArguments(raw.Arguments)
+	return nil
+}
+
+func normalizeFunctionArguments(value interface{}) string {
+	switch v := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	default:
+		data, err := json.Marshal(v)
+		if err != nil {
+			return ""
+		}
+		return string(data)
+	}
 }
 
 type ApiReq struct {
