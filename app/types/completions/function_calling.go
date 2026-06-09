@@ -157,6 +157,20 @@ func MessagesNeedPreprocess(messages []ApiMessage) bool {
 	return false
 }
 
+func MessagesContainToolResults(messages []ApiMessage) bool {
+	for _, message := range messages {
+		role := strings.TrimSpace(message.Role)
+		if role == "tool" || role == "function" {
+			return true
+		}
+		content := contentToText(message.Content)
+		if strings.Contains(content, "<tool_result>") && strings.Contains(content, "</tool_result>") {
+			return true
+		}
+	}
+	return false
+}
+
 func BuildFunctionPrompt(tools []Tool, toolChoice interface{}) (string, error) {
 	toolList, err := buildToolsList(tools)
 	if err != nil {
@@ -349,6 +363,31 @@ func ToolCallPrefixText(content string) string {
 		return content
 	}
 	return strings.TrimSpace(content[:pos])
+}
+
+func StripFunctionCallXML(content string) string {
+	pos := FindLastTriggerOutsideThink(content, ToolifyTriggerSignal)
+	if pos == -1 {
+		return content
+	}
+	afterTrigger := content[pos:]
+	match := functionCallsRE.FindStringIndex(afterTrigger)
+	if len(match) != 2 {
+		return content
+	}
+	if strings.TrimSpace(afterTrigger[:match[0]]) != ToolifyTriggerSignal {
+		return content
+	}
+	before := strings.TrimSpace(content[:pos])
+	after := strings.TrimSpace(afterTrigger[match[1]:])
+	switch {
+	case before == "":
+		return after
+	case after == "":
+		return before
+	default:
+		return before + "\n\n" + after
+	}
 }
 
 func legacyFunctionCallToToolChoice(value interface{}) interface{} {

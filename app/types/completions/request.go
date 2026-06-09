@@ -91,6 +91,7 @@ type ApiReq struct {
 	ConversationId  string         `json:"conversation_id"`
 	ParentMessageId string         `json:"parent_message_id"`
 	NewMessages     string         `json:"-"`
+	HasToolResults  bool           `json:"-"`
 }
 
 type ApiMessage struct {

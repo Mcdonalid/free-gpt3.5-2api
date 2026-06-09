@@ -71,6 +71,7 @@ func Completions(c *gin.Context) {
 func prepareFunctionCallingRequest(apiReq *completions.ApiReq) error {
 	completions.NormalizeLegacyFunctions(apiReq)
 	hasTools := completions.HasTools(apiReq)
+	apiReq.HasToolResults = completions.MessagesContainToolResults(apiReq.Messages)
 	if completions.MessagesNeedPreprocess(apiReq.Messages) {
 		processed, err := completions.PreprocessMessages(apiReq.Messages)
 		if err != nil {
@@ -526,6 +527,9 @@ func handlerResponse(c *gin.Context, apiReq *completions.ApiReq, resp *http.Resp
 				result.FinishReason = "tool_calls"
 			}
 		}
+	}
+	if !hasTools && apiReq.HasToolResults {
+		result.Content = completions.StripFunctionCallXML(result.Content)
 	}
 	if apiReq.Stream && hasTools {
 		if err == errToolCallsStreamFinished {

@@ -202,6 +202,24 @@ func TestToolCallsStreamChunkIncludesExplicitNullContent(t *testing.T) {
 	}
 }
 
+func TestStripFunctionCallXMLKeepsAnswerText(t *testing.T) {
+	content := ToolifyTriggerSignal + `
+<function_calls>
+<function_call>
+<tool>get_weather</tool>
+<args_json><![CDATA[{"city":"呼和浩特"}]]></args_json>
+</function_call>
+</function_calls>呼和浩特现在是晴天，26℃。`
+
+	stripped := StripFunctionCallXML(content)
+	if strings.Contains(stripped, ToolifyTriggerSignal) || strings.Contains(stripped, "<function_calls>") {
+		t.Fatalf("function call XML leaked after stripping: %s", stripped)
+	}
+	if stripped != "呼和浩特现在是晴天，26℃。" {
+		t.Fatalf("unexpected stripped content: %s", stripped)
+	}
+}
+
 func intPtr(value int) *int {
 	return &value
 }
