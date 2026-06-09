@@ -48,8 +48,9 @@ type challenge struct {
 func New(token string, retry int) (*Client, error) {
 	token = strings.TrimSpace(token)
 	localToken := strings.TrimSpace(strings.TrimPrefix(token, "Bearer "))
-	if strings.HasPrefix(localToken, "at-") {
-		return newClient("Bearer "+strings.TrimPrefix(localToken, "at-"), "")
+	appConf := conf.GetApp()
+	if accessToken, ok := appConf.DirectAccessToken(localToken); ok {
+		return newClient("Bearer "+accessToken, "")
 	}
 	if strings.HasPrefix(token, "Bearer eyJhbGciOiJSUzI1NiI") {
 		return newClient(token, "")
