@@ -6,6 +6,9 @@ type OutputItem struct {
 	Status        string        `json:"status"`
 	Role          string        `json:"role,omitempty"`
 	Content       []ContentPart `json:"content,omitempty"`
+	CallID        string        `json:"call_id,omitempty"`
+	Name          string        `json:"name,omitempty"`
+	Arguments     string        `json:"arguments,omitempty"`
 	Result        string        `json:"result,omitempty"`
 	RevisedPrompt string        `json:"revised_prompt,omitempty"`
 }
@@ -37,5 +40,16 @@ func TextOutputItem(id string, text string, status string) OutputItem {
 			Text:        text,
 			Annotations: []interface{}{},
 		}},
+	}
+}
+
+func FunctionCallOutputItem(id string, callID string, name string, arguments string, status string) OutputItem {
+	return OutputItem{
+		ID:        id,
+		Type:      "function_call",
+		Status:    status,
+		CallID:    callID,
+		Name:      name,
+		Arguments: arguments,
 	}
 }

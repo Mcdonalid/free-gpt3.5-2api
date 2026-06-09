@@ -21,8 +21,9 @@ type ApiStreamChoice struct {
 }
 
 type ApiStreamDelta struct {
-	Content string `json:"content,omitempty"`
-	Role    string `json:"role,omitempty"`
+	Content   *string    `json:"content,omitempty"`
+	Role      string     `json:"role,omitempty"`
+	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 }
 
 func (ARS *ApiRespStream) String() string {

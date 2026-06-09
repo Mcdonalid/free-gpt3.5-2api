@@ -10,10 +10,14 @@ type ApiReq struct {
 }
 
 type Tool struct {
-	Type         string `json:"type"`
-	Model        string `json:"model,omitempty"`
-	Action       string `json:"action,omitempty"`
-	Size         string `json:"size,omitempty"`
-	Quality      string `json:"quality,omitempty"`
-	OutputFormat string `json:"output_format,omitempty"`
+	Type         string                 `json:"type"`
+	Name         string                 `json:"name,omitempty"`
+	Description  string                 `json:"description,omitempty"`
+	Parameters   map[string]interface{} `json:"parameters,omitempty"`
+	Strict       *bool                  `json:"strict,omitempty"`
+	Model        string                 `json:"model,omitempty"`
+	Action       string                 `json:"action,omitempty"`
+	Size         string                 `json:"size,omitempty"`
+	Quality      string                 `json:"quality,omitempty"`
+	OutputFormat string                 `json:"output_format,omitempty"`
 }

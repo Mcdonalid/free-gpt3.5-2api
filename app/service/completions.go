@@ -20,11 +20,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+var errToolCallsStreamFinished = errors.New("tool calls stream finished")
+
 func Completions(c *gin.Context) {
 	apiReq := &completions.ApiReq{}
 	err := c.BindJSON(apiReq)
 	if err != nil {
 		common.ErrorResponse(c, http.StatusBadRequest, "Invalid parameter", nil)
+		return
+	}
+	if err := prepareFunctionCallingRequest(apiReq); err != nil {
+		common.ErrorResponse(c, http.StatusBadRequest, err.Error(), nil)
 		return
 	}
 	chatReq := completions.BuildChatRequest(apiReq)
@@ -51,11 +57,32 @@ func Completions(c *gin.Context) {
 		return
 	}
 	if !apiReq.Stream {
-		resp := completions.NewApiRespJson(completions.GenerateCompletionID(29), apiReq.Model, result.Content)
+		id := completions.GenerateCompletionID(29)
+		resp := completions.NewApiRespJson(id, apiReq.Model, result.Content)
+		if len(result.ToolCalls) > 0 {
+			resp = completions.NewToolCallsApiRespJson(id, apiReq.Model, result.ToolContent, result.ToolCalls)
+		}
 		resp.ConversationId = result.ConversationId
 		resp.MessageId = result.MessageId
 		c.JSON(http.StatusOK, resp)
 	}
+}
+
+func prepareFunctionCallingRequest(apiReq *completions.ApiReq) error {
+	completions.NormalizeLegacyFunctions(apiReq)
+	if !completions.HasTools(apiReq) {
+		return nil
+	}
+	processed, err := completions.PreprocessMessages(apiReq.Messages)
+	if err != nil {
+		return err
+	}
+	prompt, err := completions.BuildFunctionPrompt(apiReq.Tools, apiReq.ToolChoice)
+	if err != nil {
+		return err
+	}
+	apiReq.Messages = append([]completions.ApiMessage{{Role: "system", Content: prompt}}, processed...)
+	return nil
 }
 
 func handleResponseError(c *gin.Context, response *http.Response, accessToken string) bool {
@@ -196,11 +223,14 @@ type chatResult struct {
 	ConversationId string
 	MessageId      string
 	FinishReason   string
+	ToolCalls      []completions.ToolCall
+	ToolContent    string
 }
 
 type chatStreamEvent struct {
 	Response     chat.Response
 	Delta        string
+	Text         string
 	IsFirstChunk bool
 	Result       *chatResult
 }
@@ -267,10 +297,12 @@ func handleChatStream(resp *http.Response, onEvent func(chatStreamEvent) error) 
 			if err := onEvent(chatStreamEvent{
 				Response:     chatResp,
 				Delta:        delta,
+				Text:         previousText.Text,
 				IsFirstChunk: isFirstChunk,
 				Result:       result,
 			}); err != nil {
-				return nil, err
+				result.Content = previousText.Text
+				return result, err
 			}
 		}
 		isFirstChunk = false
@@ -455,9 +487,14 @@ func handlerResponse(c *gin.Context, apiReq *completions.ApiReq, resp *http.Resp
 		c.Header("Content-Type", "application/json")
 	}
 	id := completions.GenerateCompletionID(29)
+	hasTools := completions.HasTools(apiReq)
+	detector := completions.NewStreamToolDetector(completions.ToolifyTriggerSignal)
 	result, err := handleChatStream(resp, func(event chatStreamEvent) error {
 		if !apiReq.Stream {
 			return nil
+		}
+		if hasTools {
+			return streamFunctionCallingDelta(c, id, apiReq, detector, event)
 		}
 		apiRespJson := completions.NewApiRespStream(id, apiReq.Model, event.Delta)
 		apiRespJson.ConversationId = event.Response.ConversationId
@@ -471,8 +508,48 @@ func handlerResponse(c *gin.Context, apiReq *completions.ApiReq, resp *http.Resp
 		c.Writer.Flush()
 		return nil
 	})
-	if err != nil {
+	if err != nil && err != errToolCallsStreamFinished {
 		return nil, err
+	}
+	if result == nil {
+		result = &chatResult{}
+	}
+	if hasTools && len(result.ToolCalls) == 0 {
+		if calls := completions.ParseFunctionCallsXML(result.Content, completions.ToolifyTriggerSignal); len(calls) > 0 {
+			if err := completions.ValidateParsedToolCalls(calls, apiReq.Tools); err == nil {
+				result.ToolCalls = completions.ToolCallsFromParsed(calls, false)
+				result.ToolContent = completions.ToolCallPrefixText(result.Content)
+				result.FinishReason = "tool_calls"
+			}
+		}
+	}
+	if apiReq.Stream && hasTools {
+		if err == errToolCallsStreamFinished {
+			return result, nil
+		}
+		if detector.State() == "tool_parsing" {
+			if calls := detector.Finalize(); len(calls) > 0 {
+				if err := completions.ValidateParsedToolCalls(calls, apiReq.Tools); err == nil {
+					result.ToolCalls = completions.ToolCallsFromParsed(calls, true)
+					result.ToolContent = completions.ToolCallPrefixText(result.Content)
+					if writeErr := writeToolCallsStream(c, id, apiReq.Model, result.ToolCalls); writeErr != nil {
+						return nil, writeErr
+					}
+					return result, nil
+				}
+			}
+			if detector.Buffer() != "" {
+				apiRespJson := completions.NewApiRespStream(id, apiReq.Model, detector.Buffer())
+				if _, err := c.Writer.WriteString("data: " + apiRespJson.String() + "\n\n"); err != nil {
+					return nil, err
+				}
+			}
+		} else if text := detector.FlushText(); text != "" {
+			apiRespJson := completions.NewApiRespStream(id, apiReq.Model, text)
+			if _, err := c.Writer.WriteString("data: " + apiRespJson.String() + "\n\n"); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if apiReq.Stream {
 		finalLine := completions.StopChunk(id, apiReq.Model, result.FinishReason)
@@ -480,4 +557,66 @@ func handlerResponse(c *gin.Context, apiReq *completions.ApiReq, resp *http.Resp
 		_, _ = c.Writer.WriteString("data: [DONE]\n\n")
 	}
 	return result, nil
+}
+
+func streamFunctionCallingDelta(c *gin.Context, id string, apiReq *completions.ApiReq, detector *completions.StreamToolDetector, event chatStreamEvent) error {
+	if detector.State() == "tool_parsing" {
+		detector.AppendParsing(event.Delta)
+		if !detector.HasCompleteToolBlock() {
+			return nil
+		}
+		calls := detector.Finalize()
+		if len(calls) == 0 || completions.ValidateParsedToolCalls(calls, apiReq.Tools) != nil {
+			finalLine := completions.StopChunk(id, apiReq.Model, "stop")
+			if _, err := c.Writer.WriteString(fmt.Sprint("data: ", finalLine.String(), "\n\n")); err != nil {
+				return err
+			}
+			if _, err := c.Writer.WriteString("data: [DONE]\n\n"); err != nil {
+				return err
+			}
+			c.Writer.Flush()
+			return errToolCallsStreamFinished
+		}
+		event.Result.ToolCalls = completions.ToolCallsFromParsed(calls, true)
+		event.Result.ToolContent = completions.ToolCallPrefixText(event.Text)
+		event.Result.FinishReason = "tool_calls"
+		if err := writeToolCallsStream(c, id, apiReq.Model, event.Result.ToolCalls); err != nil {
+			return err
+		}
+		return errToolCallsStreamFinished
+	}
+
+	detected, content := detector.ProcessChunk(event.Delta)
+	if content != "" {
+		apiRespJson := completions.NewApiRespStream(id, apiReq.Model, content)
+		apiRespJson.ConversationId = event.Response.ConversationId
+		apiRespJson.MessageId = event.Response.Message.Id
+		if event.IsFirstChunk {
+			apiRespJson.Choices[0].Delta.Role = event.Response.Message.Author.Role
+		}
+		if _, err := c.Writer.WriteString("data: " + apiRespJson.String() + "\n\n"); err != nil {
+			return err
+		}
+		c.Writer.Flush()
+	}
+	if detected {
+		return nil
+	}
+	return nil
+}
+
+func writeToolCallsStream(c *gin.Context, id string, model string, toolCalls []completions.ToolCall) error {
+	toolChunk := completions.NewToolCallsApiRespStream(id, model, toolCalls)
+	if _, err := c.Writer.WriteString("data: " + toolChunk.String() + "\n\n"); err != nil {
+		return err
+	}
+	finalLine := completions.StopChunk(id, model, "tool_calls")
+	if _, err := c.Writer.WriteString(fmt.Sprint("data: ", finalLine.String(), "\n\n")); err != nil {
+		return err
+	}
+	if _, err := c.Writer.WriteString("data: [DONE]\n\n"); err != nil {
+		return err
+	}
+	c.Writer.Flush()
+	return nil
 }

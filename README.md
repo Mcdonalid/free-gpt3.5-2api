@@ -8,6 +8,7 @@
 
 - `POST /v1/chat/completions`：兼容 Chat Completions，请求支持普通 JSON 与 stream。
 - `POST /v1/responses`：兼容 Responses API 文本链路，请求支持普通 JSON 与 stream。
+- Function Calling：兼容 OpenAI `tools`/`tool_choice`、旧版 `functions`/`function_call`，支持多工具调用、工具结果回填与流式 tool calls。
 - `GET /v1/accTokens`：查看配置账号池可用数量。
 - 本地 `sk-` auth key：使用配置文件中的 `chatgpts` 账号池请求上游。
 - 直传 `at-` access token：使用 `Authorization: Bearer at-<real_access_token>`，跳过账号池，直接用 `at-` 后面的真实 access token 请求上游。
@@ -159,6 +160,31 @@ curl http://127.0.0.1:3040/v1/chat/completions \
   -d '{"model":"auto","stream":true,"messages":[{"role":"user","content":"ping"}]}'
 ```
 
+Function Calling：
+
+```bash
+curl http://127.0.0.1:3040/v1/chat/completions \
+  -H 'Authorization: Bearer sk-your-local-key' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model":"auto",
+    "messages":[{"role":"user","content":"查一下杭州天气"}],
+    "tools":[{
+      "type":"function",
+      "function":{
+        "name":"get_weather",
+        "description":"查询指定城市天气",
+        "parameters":{
+          "type":"object",
+          "properties":{"city":{"type":"string"}},
+          "required":["city"]
+        }
+      }
+    }],
+    "tool_choice":"auto"
+  }'
+```
+
 ### Responses
 
 普通文本请求：
@@ -188,7 +214,7 @@ curl http://127.0.0.1:3040/v1/responses \
   -d '{"model":"auto","stream":true,"input":"ping"}'
 ```
 
-当前 Go 版本的 `/v1/responses` 仅实现文本链路；`image_generation` 工具会返回未实现错误。
+`/v1/responses` 文本链路同样支持 `function` tools；`image_generation` 工具会走图片生成兼容链路。
 
 ## 错误排查
 
@@ -202,6 +228,7 @@ curl http://127.0.0.1:3040/v1/responses \
 - https://github.com/aurora-develop/aurora
 - https://github.com/xqdoo00o/ChatGPT-to-API
 - https://github.com/basketikun/chatgpt2api
+- https://github.com/funnycups/Toolify
 
 ## Powered By
 

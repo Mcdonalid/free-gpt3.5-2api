@@ -7,15 +7,10 @@ import (
 	"strings"
 )
 
-const responsesToolUnavailableSystemMessage = "This compatibility backend cannot execute local tools, shell commands, web searches, or file operations. Do not claim to have run tools or inspected external resources. If a user asks you to use a tool, say that tool execution is unavailable through this backend."
-
 func completionMessagesFromResponse(req *responses.ApiReq) []completions.ApiMessage {
 	messages := make([]completions.ApiMessage, 0)
 	if strings.TrimSpace(req.Instructions) != "" {
 		messages = append(messages, completions.ApiMessage{Role: "system", Content: strings.TrimSpace(req.Instructions)})
-	}
-	if hasResponsesNonImageTools(req.Tools) {
-		messages = append(messages, completions.ApiMessage{Role: "system", Content: responsesToolUnavailableSystemMessage})
 	}
 	return append(messages, completionMessagesFromResponseInput(req.Input)...)
 }
@@ -108,6 +103,43 @@ func hasResponsesImageGenerationTool(req *responses.ApiReq) bool {
 		}
 	}
 	return false
+}
+
+func completionToolsFromResponses(tools []responses.Tool) []completions.Tool {
+	out := make([]completions.Tool, 0, len(tools))
+	for _, tool := range tools {
+		if strings.TrimSpace(tool.Type) != "function" {
+			continue
+		}
+		out = append(out, completions.Tool{
+			Type: "function",
+			Function: completions.ToolFunction{
+				Name:        strings.TrimSpace(tool.Name),
+				Description: tool.Description,
+				Parameters:  tool.Parameters,
+				Strict:      tool.Strict,
+			},
+		})
+	}
+	return out
+}
+
+func completionToolChoiceFromResponses(value interface{}) interface{} {
+	switch v := value.(type) {
+	case map[string]interface{}:
+		if strings.TrimSpace(responseStringValue(v["type"], "")) == "function" {
+			if _, ok := v["function"]; ok {
+				return v
+			}
+			if name := strings.TrimSpace(responseStringValue(v["name"], "")); name != "" {
+				return map[string]interface{}{
+					"type":     "function",
+					"function": map[string]interface{}{"name": name},
+				}
+			}
+		}
+	}
+	return value
 }
 
 func responseToolChoiceType(value interface{}) string {

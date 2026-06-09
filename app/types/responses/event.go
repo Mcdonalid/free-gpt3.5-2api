@@ -4,6 +4,7 @@ import "encoding/json"
 
 type Event struct {
 	Type         string      `json:"type"`
+	ResponseID   string      `json:"response_id,omitempty"`
 	Response     *Response   `json:"response,omitempty"`
 	OutputIndex  int         `json:"output_index,omitempty"`
 	ContentIndex int         `json:"content_index,omitempty"`
@@ -11,6 +12,9 @@ type Event struct {
 	Item         *OutputItem `json:"item,omitempty"`
 	Delta        string      `json:"delta,omitempty"`
 	Text         string      `json:"text,omitempty"`
+	Name         string      `json:"name,omitempty"`
+	CallID       string      `json:"call_id,omitempty"`
+	Arguments    string      `json:"arguments,omitempty"`
 }
 
 func CreatedEvent(responseID string, model string, created int64) Event {
