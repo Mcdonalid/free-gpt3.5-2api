@@ -40,6 +40,6 @@ type CitaMeta struct {
 }
 
 type FinishDetails struct {
-	Type string `json:"types"`
+	Type string `json:"type"`
 	Stop string `json:"stop"`
 }

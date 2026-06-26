@@ -35,6 +35,4 @@ test
 /CHANGELOG.md
 conf/**
 !/conf/app.demo.yaml
-chatgpt2api
-aurora
-Toolify
+refer

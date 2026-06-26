@@ -210,7 +210,8 @@ func collectAuroraConversationImageResponse(c *gin.Context, prompt string, tool 
 	chatReq := imageConversationRequest(prompt, nil, tool)
 	applyChatTargetDefaults(backend, chatReq)
 	applyFConversationPayloadDefaults(chatReq)
-	conduitToken, err := prepareFConversation(backend, backend.BaseURL+"/backend-api/f/conversation", chatReq)
+	turnTraceID := uuid.New().String()
+	conduitToken, err := prepareFConversation(backend, chatReq, turnTraceID)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +220,7 @@ func collectAuroraConversationImageResponse(c *gin.Context, prompt string, tool 
 		"messages":                 auroraImageMessages(prompt),
 		"parent_message_id":        uuid.New().String(),
 		"model":                    imageChatModel(tool.Model),
-		"client_prepare_state":     "sent",
+		"client_prepare_state":     string(fConversationPrepareStateSuccess),
 		"timezone_offset_min":      chatReq.TimeZoneOffsetMin,
 		"timezone":                 chatReq.Timezone,
 		"conversation_mode":        map[string]string{"kind": "primary_assistant"},
@@ -249,7 +250,9 @@ func collectAuroraConversationImageResponse(c *gin.Context, prompt string, tool 
 	headers, cookies := backend.Headers(upstreamURL)
 	headers.Set("accept", "text/event-stream")
 	headers.Set("content-type", "application/json")
-	applySentinelHeaders(headers, backend, true)
+	headers.Set("oai-echo-logs", "0,943,1,65876,0,68124,1,68930")
+	headers.Set("oai-telemetry", "[1,null]")
+	applySentinelHeaders(headers, backend, turnTraceID)
 	if conduitToken != "" {
 		headers.Set("x-conduit-token", conduitToken)
 	}

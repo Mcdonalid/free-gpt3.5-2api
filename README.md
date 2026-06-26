@@ -421,9 +421,6 @@ curl http://127.0.0.1:3040/v1/responses \
 ## 参考项目
 
 - https://github.com/aurora-develop/aurora
-- https://github.com/xqdoo00o/ChatGPT-to-API
-- https://github.com/basketikun/chatgpt2api
-- https://github.com/funnycups/Toolify
 
 ## Powered By
 

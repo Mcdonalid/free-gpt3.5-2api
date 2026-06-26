@@ -186,8 +186,8 @@ func TestToolCallFunctionAcceptsObjectArguments(t *testing.T) {
 	}
 }
 
-func TestToolCallsStreamChunkIncludesExplicitNullContent(t *testing.T) {
-	chunk := NewToolCallsApiRespStream("chatcmpl_test", "auto", []ToolCall{{
+func TestToolCallsStreamChunksSplitNameAndArguments(t *testing.T) {
+	chunks := NewToolCallsApiRespStreams("chatcmpl_test", "auto", []ToolCall{{
 		Index: intPtr(0),
 		ID:    "call_1",
 		Type:  "function",
@@ -196,9 +196,30 @@ func TestToolCallsStreamChunkIncludesExplicitNullContent(t *testing.T) {
 			Arguments: `{"query":"go"}`,
 		},
 	}})
-	data := chunk.String()
-	if !strings.Contains(data, `"content":null`) {
-		t.Fatalf("tool call stream delta should include content:null, got %s", data)
+	if len(chunks) != 2 {
+		t.Fatalf("expected name and arguments chunks, got %d", len(chunks))
+	}
+	first := chunks[0].String()
+	if !strings.Contains(first, `"id":"call_1"`) || !strings.Contains(first, `"type":"function"`) || !strings.Contains(first, `"name":"search"`) {
+		t.Fatalf("first tool call chunk should contain id/type/name, got %s", first)
+	}
+	if strings.Contains(first, `"arguments"`) || strings.Contains(first, `"content":null`) {
+		t.Fatalf("first tool call chunk should not contain arguments or content:null, got %s", first)
+	}
+	second := chunks[1].String()
+	var secondChunk ApiRespStream
+	if err := json.Unmarshal([]byte(second), &secondChunk); err != nil {
+		t.Fatal(err)
+	}
+	if len(secondChunk.Choices) != 1 || len(secondChunk.Choices[0].Delta.ToolCalls) != 1 {
+		t.Fatalf("second tool call chunk should contain one tool delta, got %s", second)
+	}
+	secondCall := secondChunk.Choices[0].Delta.ToolCalls[0]
+	if secondCall.Index == nil || *secondCall.Index != 0 || secondCall.Function.Arguments != `{"query":"go"}` {
+		t.Fatalf("second tool call chunk should contain arguments delta, got %s", second)
+	}
+	if secondCall.ID != "" || secondCall.Type != "" || secondCall.Function.Name != "" {
+		t.Fatalf("second tool call chunk should only append arguments, got %s", second)
 	}
 }
 

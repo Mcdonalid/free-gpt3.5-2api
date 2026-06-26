@@ -26,13 +26,16 @@ func sendChatRequest(c *gin.Context, chatReq *chat.Request) (*http.Response, str
 	}
 	applyChatTargetDefaults(backend, chatReq)
 	upstreamURL := backend.ChatURL
+	conduitToken := ""
+	turnTraceID := uuid.New().String()
 	if shouldUseFConversation(backend) {
 		upstreamURL = backend.BaseURL + "/backend-api/f/conversation"
 		applyFConversationPayloadDefaults(chatReq)
-	}
-	conduitToken, err := prepareFConversation(backend, upstreamURL, chatReq)
-	if err != nil {
-		return nil, backend.AccAuth, err
+		var prepareErr error
+		conduitToken, prepareErr = prepareFConversation(backend, chatReq, turnTraceID)
+		if prepareErr != nil {
+			return nil, backend.AccAuth, prepareErr
+		}
 	}
 	body, err := common.Struct2BytesBuffer(chatReq)
 	if err != nil {
@@ -41,7 +44,11 @@ func sendChatRequest(c *gin.Context, chatReq *chat.Request) (*http.Response, str
 	headers, cookies := backend.Headers(upstreamURL)
 	headers.Set("accept", "text/event-stream")
 	headers.Set("content-type", "application/json")
-	applySentinelHeaders(headers, backend, true)
+	if shouldUseFConversation(backend) {
+		headers.Set("oai-echo-logs", "0,943,1,65876,0,68124,1,68930")
+		headers.Set("oai-telemetry", "[1,null]")
+	}
+	applySentinelHeaders(headers, backend, turnTraceID)
 	if conduitToken != "" {
 		headers.Set("x-conduit-token", conduitToken)
 	}
@@ -82,7 +89,7 @@ func messageHasAssetPointer(message chat.Message) bool {
 }
 
 func applyFConversationPayloadDefaults(chatReq *chat.Request) {
-	chatReq.ClientPrepareState = "sent"
+	chatReq.ClientPrepareState = string(fConversationPrepareStateSuccess)
 	chatReq.EnableMessageFollowups = true
 	chatReq.SupportsBuffering = true
 	chatReq.SupportedEncodings = []string{"v1"}
@@ -102,26 +109,61 @@ func applyFConversationPayloadDefaults(chatReq *chat.Request) {
 	}
 }
 
-func prepareFConversation(backend *chatgpt_backend.Client, upstreamURL string, chatReq *chat.Request) (string, error) {
-	if backend.AccAuth == "" || !strings.HasSuffix(upstreamURL, "/backend-api/f/conversation") {
+type fConversationPrepareState string
+
+const (
+	fConversationPrepareStateNone    fConversationPrepareState = "none"
+	fConversationPrepareStateSent    fConversationPrepareState = "sent"
+	fConversationPrepareStateSuccess fConversationPrepareState = "success"
+)
+
+func prepareFConversation(backend *chatgpt_backend.Client, chatReq *chat.Request, turnTraceID string) (string, error) {
+	if backend.AccAuth == "" {
 		return "", nil
 	}
+	conduitToken := ""
+	for _, state := range []fConversationPrepareState{
+		fConversationPrepareStateNone,
+		fConversationPrepareStateSent,
+		fConversationPrepareStateSuccess,
+	} {
+		nextToken, err := prepareFConversationState(backend, chatReq, turnTraceID, state, conduitToken)
+		if err != nil {
+			return "", err
+		}
+		conduitToken = nextToken
+	}
+	return conduitToken, nil
+}
+
+func prepareFConversationState(backend *chatgpt_backend.Client, chatReq *chat.Request, turnTraceID string, prepareState fConversationPrepareState, previousConduitToken string) (string, error) {
 	path := "/backend-api/f/conversation/prepare"
+	parentMessageID := chatReq.ParentMessageId
+	if parentMessageID == "" {
+		parentMessageID = "client-created-root"
+	}
 	payload := map[string]interface{}{
-		"action":                 "next",
-		"fork_from_shared_post":  false,
-		"parent_message_id":      chatReq.ParentMessageId,
-		"model":                  chatReq.Model,
-		"client_prepare_state":   "success",
-		"timezone_offset_min":    chatReq.TimeZoneOffsetMin,
-		"timezone":               chatReq.Timezone,
-		"conversation_mode":      chatReq.ConversationMode,
-		"system_hints":           chatReq.SystemHints,
-		"partial_query":          partialQueryFromChatRequest(chatReq),
-		"supports_buffering":     true,
-		"supported_encodings":    []string{"v1"},
-		"client_contextual_info": map[string]interface{}{"app_name": "chatgpt.com"},
-		"thinking_effort":        "standard",
+		"action":                "next",
+		"fork_from_shared_post": false,
+		"parent_message_id":     parentMessageID,
+		"model":                 conversationPrepareModel(chatReq.Model),
+		"client_prepare_state":  string(prepareState),
+		"timezone_offset_min":   chatReq.TimeZoneOffsetMin,
+		"timezone":              chatReq.Timezone,
+		"conversation_mode":     map[string]string{"kind": "primary_assistant"},
+		"system_hints":          []string{},
+		"supports_buffering":    true,
+		"supported_encodings":   []string{"v1"},
+		"client_contextual_info": map[string]interface{}{
+			"app_name": "chatgpt.com",
+		},
+		"thinking_effort": "standard",
+	}
+	if prepareState == fConversationPrepareStateSent || prepareState == fConversationPrepareStateSuccess {
+		payload["partial_query"] = partialQueryFromChatRequest(chatReq)
+	}
+	if chatReq.ConversationId != "" {
+		payload["conversation_id"] = chatReq.ConversationId
 	}
 	if mimeTypes := attachmentMimeTypes(chatReq); len(mimeTypes) > 0 {
 		payload["attachment_mime_types"] = mimeTypes
@@ -131,17 +173,22 @@ func prepareFConversation(backend *chatgpt_backend.Client, upstreamURL string, c
 		return "", err
 	}
 	headers, cookies := backend.Headers(backend.BaseURL + path)
-	headers.Set("accept", "application/json")
+	headers.Set("accept", "*/*")
 	headers.Set("content-type", "application/json")
-	applySentinelHeaders(headers, backend, false)
+	headers.Set("x-openai-target-path", path)
+	headers.Set("x-openai-target-route", path)
+	applySentinelHeaders(headers, backend, turnTraceID)
+	if previousConduitToken != "" {
+		headers.Set("x-conduit-token", previousConduitToken)
+	}
 	resp, err := backend.HTTP.Request(tls_client_httpi.POST, backend.BaseURL+path, headers, cookies, bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("prepare f conversation failed: %w", err)
+		return "", fmt.Errorf("prepare conversation(%s) failed: %w", prepareState, err)
 	}
 	defer resp.Body.Close()
 	if !isHTTPSuccess(resp.StatusCode) {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return "", fmt.Errorf("prepare f conversation failed: status=%d body=%s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("prepare conversation(%s) failed: status=%d body=%s", prepareState, resp.StatusCode, string(body))
 	}
 	var result struct {
 		ConduitToken string `json:"conduit_token"`
@@ -152,19 +199,26 @@ func prepareFConversation(backend *chatgpt_backend.Client, upstreamURL string, c
 	return strings.TrimSpace(result.ConduitToken), nil
 }
 
-func applySentinelHeaders(headers tls_client_httpi.Headers, backend *chatgpt_backend.Client, includeTurnTrace bool) {
+func conversationPrepareModel(model string) string {
+	if model == "" {
+		return "auto"
+	}
+	return model
+}
+
+func applySentinelHeaders(headers tls_client_httpi.Headers, backend *chatgpt_backend.Client, turnTraceID string) {
 	headers.Set("openai-sentinel-chat-requirements-token", backend.Auth.Token)
+	if backend.Auth.PrepareToken != "" {
+		headers.Set("openai-sentinel-chat-requirements-prepare-token", backend.Auth.PrepareToken)
+	}
 	if backend.Auth.ProofWork.Ospt != "" {
 		headers.Set("openai-sentinel-proof-token", backend.Auth.ProofWork.Ospt)
 	}
 	if backend.Auth.TurnstileToken != "" {
 		headers.Set("openai-sentinel-turnstile-token", backend.Auth.TurnstileToken)
 	}
-	if backend.Auth.SoToken != "" {
-		headers.Set("openai-sentinel-so-token", backend.Auth.SoToken)
-	}
-	if includeTurnTrace {
-		headers.Set("x-oai-turn-trace-id", uuid.New().String())
+	if turnTraceID != "" {
+		headers.Set("x-oai-turn-trace-id", turnTraceID)
 	}
 }
 
@@ -190,7 +244,7 @@ func latestUserMessage(messages []chat.Message) chat.Message {
 }
 
 func attachmentMimeTypes(chatReq *chat.Request) []string {
-	seen := map[string]bool{}
+	seen := make(map[string]bool)
 	result := make([]string, 0)
 	for _, message := range chatReq.Messages {
 		attachments, ok := message.Metadata["attachments"].([]chat.Attachment)

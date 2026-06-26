@@ -263,6 +263,10 @@ func handleChatStream(resp *http.Response, onEvent func(chatStreamEvent) error) 
 		if payload == "[DONE]" {
 			break
 		}
+		// Filter out internal tool noise
+		if shouldSkipInternalToolOutput(payload) {
+			continue
+		}
 		var rawEvent map[string]interface{}
 		_ = json.Unmarshal([]byte(payload), &rawEvent)
 		var chatResp chat.Response
@@ -312,7 +316,7 @@ func handleChatStream(resp *http.Response, onEvent func(chatStreamEvent) error) 
 		}
 		isFirstChunk = false
 		if chatResp.Message.Metadata.FinishDetails != nil {
-			result.FinishReason = chatResp.Message.Metadata.FinishDetails.Type
+			result.FinishReason = normalizeFinishReason(chatResp.Message.Metadata.FinishDetails.Type)
 		}
 	}
 	result.Content = previousText.Text
@@ -478,11 +482,57 @@ func patchTextValue(value interface{}) string {
 	}
 }
 
+func normalizeFinishReason(reason string) string {
+	switch strings.TrimSpace(reason) {
+	case "", "stop":
+		return "stop"
+	case "max_tokens":
+		return "length"
+	default:
+		return reason
+	}
+}
+
 func responseMapValue(value interface{}) map[string]interface{} {
 	if v, ok := value.(map[string]interface{}); ok {
 		return v
 	}
 	return nil
+}
+
+func shouldSkipInternalToolOutput(payload string) bool {
+	// Skip internal tool execution noise
+	if strings.Contains(payload, `print("skip")`) {
+		return true
+	}
+	if strings.Contains(payload, "wrong tool usage attempt removed") {
+		return true
+	}
+	if strings.Contains(payload, "exec_command") {
+		return true
+	}
+	// Skip empty or placeholder content
+	var raw map[string]interface{}
+	if err := json.Unmarshal([]byte(payload), &raw); err != nil {
+		return false
+	}
+	// Check message content
+	if msg, ok := raw["message"].(map[string]interface{}); ok {
+		if content, ok := msg["content"].(map[string]interface{}); ok {
+			if parts, ok := content["parts"].([]interface{}); ok {
+				for _, part := range parts {
+					if str, ok := part.(string); ok {
+						if strings.Contains(str, `print("skip")`) ||
+							strings.Contains(str, "wrong tool usage attempt removed") ||
+							strings.Contains(str, "exec_command") {
+							return true
+						}
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 func handlerResponse(c *gin.Context, apiReq *completions.ApiReq, resp *http.Response) (*chatResult, error) {
@@ -561,6 +611,8 @@ func handlerResponse(c *gin.Context, apiReq *completions.ApiReq, resp *http.Resp
 	}
 	if apiReq.Stream {
 		finalLine := completions.StopChunk(id, apiReq.Model, result.FinishReason)
+		finalLine.ConversationId = result.ConversationId
+		finalLine.MessageId = result.MessageId
 		_, _ = c.Writer.WriteString(fmt.Sprint("data: ", finalLine.String(), "\n\n"))
 		_, _ = c.Writer.WriteString("data: [DONE]\n\n")
 	}
@@ -614,9 +666,10 @@ func streamFunctionCallingDelta(c *gin.Context, id string, apiReq *completions.A
 }
 
 func writeToolCallsStream(c *gin.Context, id string, model string, toolCalls []completions.ToolCall) error {
-	toolChunk := completions.NewToolCallsApiRespStream(id, model, toolCalls)
-	if _, err := c.Writer.WriteString("data: " + toolChunk.String() + "\n\n"); err != nil {
-		return err
+	for _, toolChunk := range completions.NewToolCallsApiRespStreams(id, model, toolCalls) {
+		if _, err := c.Writer.WriteString("data: " + toolChunk.String() + "\n\n"); err != nil {
+			return err
+		}
 	}
 	finalLine := completions.StopChunk(id, model, "tool_calls")
 	if _, err := c.Writer.WriteString(fmt.Sprint("data: ", finalLine.String(), "\n\n")); err != nil {

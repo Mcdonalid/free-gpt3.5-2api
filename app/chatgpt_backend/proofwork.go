@@ -1,9 +1,7 @@
 package chatgpt_backend
 
 import (
-	"bytes"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -12,101 +10,52 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"golang.org/x/crypto/sha3"
 )
 
 const (
-	defaultPowScript = "https://chatgpt.com/backend-api/sentinel/sdk.js"
-	maxAttempts      = 500000
+	defaultPowScript  = "https://chatgpt.com/backend-api/sentinel/sdk.js"
+	sentinelSDKScript = "https://chatgpt.com/sentinel/20260423af3c/sdk.js"
+	powMaxAttempts    = 500000
+	powFailPrefix     = "wQ8Lk5FbGpA2NcR9dShT6gYjU7VxZ4D"
 )
 
 var (
-	cores        = []int{8, 16, 24, 32}
-	screenValues = []int{3000, 4000, 5000}
+	screenSizes  = [][2]int{{1920, 1080}, {2560, 1440}, {1536, 864}, {1440, 900}, {1366, 768}}
 	documentKeys = []string{
-		"_reactListeningo743lnnpvdg",
-		"location",
+		"_reactListening8in7sfyhjvp", "_reactListeningo743lnnpvdg",
+		"_reactContainer$5pyziap1brc", "__reactContainer$b63yiita51i",
+		"location", "cookie", "referrer", "currentScript", "body", "head", "documentElement",
 	}
 	navigatorKeys = []string{
-		"registerProtocolHandler−function registerProtocolHandler() { [native code] }",
-		"storage−[object StorageManager]",
-		"locks−[object LockManager]",
-		"appCodeName−Mozilla",
-		"permissions−[object Permissions]",
-		"share−function share() { [native code] }",
-		"webdriver−false",
-		"managed−[object NavigatorManagedData]",
-		"canShare−function canShare() { [native code] }",
-		"vendor−Google Inc.",
-		"mediaDevices−[object MediaDevices]",
-		"vibrate−function vibrate() { [native code] }",
-		"storageBuckets−[object StorageBucketManager]",
-		"mediaCapabilities−[object MediaCapabilities]",
-		"cookieEnabled−true",
-		"virtualKeyboard−[object VirtualKeyboard]",
-		"product−Gecko",
-		"presentation−[object Presentation]",
-		"onLine−true",
-		"mimeTypes−[object MimeTypeArray]",
-		"credentials−[object CredentialsContainer]",
-		"serviceWorker−[object ServiceWorkerContainer]",
-		"keyboard−[object Keyboard]",
-		"gpu−[object GPU]",
-		"doNotTrack",
-		"serial−[object Serial]",
-		"pdfViewerEnabled−true",
-		"language−zh-CN",
-		"geolocation−[object Geolocation]",
-		"userAgentData−[object NavigatorUAData]",
-		"getUserMedia−function getUserMedia() { [native code] }",
-		"sendBeacon−function sendBeacon() { [native code] }",
-		"hardwareConcurrency−32",
 		"windowControlsOverlay−[object WindowControlsOverlay]",
+		"geolocation−[object Geolocation]",
+		"clipboard−[object Clipboard]",
+		"mediaDevices−[object MediaDevices]",
+		"permissions−[object Permissions]",
+		"bluetooth−[object Bluetooth]",
+		"usb−[object USB]",
+		"serial−[object Serial]",
+		"hid−[object HID]",
+		"presentation−[object Presentation]",
+		"credentials−[object CredentialsContainer]",
 	}
 	windowKeys = []string{
-		"0",
-		"window",
-		"self",
-		"document",
-		"name",
-		"location",
-		"customElements",
-		"history",
-		"navigation",
-		"innerWidth",
-		"innerHeight",
-		"scrollX",
-		"scrollY",
-		"visualViewport",
-		"screenX",
-		"screenY",
-		"outerWidth",
-		"outerHeight",
-		"devicePixelRatio",
-		"screen",
-		"chrome",
-		"navigator",
-		"onresize",
-		"performance",
-		"crypto",
-		"indexedDB",
-		"sessionStorage",
-		"localStorage",
-		"scheduler",
-		"alert",
-		"atob",
-		"btoa",
-		"fetch",
-		"matchMedia",
-		"postMessage",
-		"queueMicrotask",
-		"requestAnimationFrame",
-		"setInterval",
-		"setTimeout",
-		"caches",
-		"__NEXT_DATA__",
-		"__BUILD_MANIFEST",
-		"__NEXT_PRELOADREADY",
+		"onchange", "onclick", "onload", "onerror", "onresize",
+		"onmouseover", "onmouseout", "onfocus", "onblur", "onscroll",
+		"onkeydown", "onkeyup", "onkeypress",
+		"requestIdleCallback", "requestAnimationFrame", "setTimeout",
+		"fetch", "console", "Promise", "Map", "Set", "WeakMap", "WeakSet",
+		"crypto", "performance", "navigator", "document", "location", "history",
+		"localStorage", "sessionStorage", "indexedDB",
+		"Image", "XMLHttpRequest", "FormData", "Headers", "Request", "Response",
+		"alert", "confirm", "prompt", "close", "focus", "blur",
+		"addEventListener", "removeEventListener", "dispatchEvent",
+		"scrollTo", "scrollBy", "scroll", "matchMedia", "getComputedStyle",
+		"getSelection", "find", "stop", "open", "print", "captureEvents",
+		"releaseEvents", "queueMicrotask", "reportError", "structuredClone",
+		"isSecureContext", "crossOriginIsolated", "originAgentCluster",
+		"speechSynthesis", "MediaSource", "Blob", "File", "FileReader",
+		"Atomics", "SharedArrayBuffer", "WebAssembly", "BigInt", "Symbol", "Proxy",
 	}
 	scriptSrcRE = regexp.MustCompile(`<script\b[^>]*\bsrc=["']([^"']+)["']`)
 	dataBuildRE = regexp.MustCompile(`(?:c/[^/]*/_|<html[^>]*data-build=["']([^"']*)["'])`)
@@ -152,18 +101,40 @@ func ParseResources(html string) Resources {
 	return resources
 }
 
-func CalcProofToken(seed string, difficulty string, userAgent string, resources ...Resources) string {
-	answer, ok := generate(seed, difficulty, buildConfig(userAgent, firstResource(resources)))
-	if !ok {
-		return ""
+func CalcProofToken(seed string, difficulty string, userAgent string, deviceID string, resources ...Resources) string {
+	if seed == "" || difficulty == "" {
+		return "gAAAAAB~S"
 	}
-	return "gAAAAAB" + answer
+	start := time.Now()
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	powConfig := fingerprintConfig{
+		UserAgent: userAgent,
+		DeviceID:  deviceID,
+		Resources: firstResource(resources),
+	}
+	for i := 0; i < powMaxAttempts; i++ {
+		elapsed := time.Since(start).Milliseconds()
+		config := powConfig.build(rng, &i, &elapsed)
+		encoded := encodeConfig(config)
+		hashResult := fnv1aHash(seed + encoded)
+		if len(difficulty) > len(hashResult) {
+			continue
+		}
+		if hashResult[:len(difficulty)] <= difficulty {
+			return "gAAAAAB" + encoded + "~S"
+		}
+	}
+	return "gAAAAAB" + powFailPrefix + base64.StdEncoding.EncodeToString([]byte(`"e"`)) + "~S"
 }
 
-func LegacyRequirementsToken(userAgent string, resources ...Resources) string {
-	seed := fmt.Sprintf("%v", rand.New(rand.NewSource(time.Now().UnixNano())).Float64())
-	answer, _ := generate(seed, "0fffff", buildConfig(userAgent, firstResource(resources)))
-	return "gAAAAAC" + answer
+func LegacyRequirementsToken(userAgent string, deviceID string, resources ...Resources) string {
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	config := fingerprintConfig{
+		UserAgent: userAgent,
+		DeviceID:  deviceID,
+		Resources: firstResource(resources),
+	}.build(rng, nil, nil)
+	return "gAAAAAC" + encodeConfig(config) + "~S"
 }
 
 func firstResource(resources []Resources) Resources {
@@ -173,83 +144,118 @@ func firstResource(resources []Resources) Resources {
 	return Resources{ScriptSources: []string{defaultPowScript}}
 }
 
-func buildConfig(userAgent string, resources Resources) []interface{} {
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-	scriptSources := resources.ScriptSources
+type fingerprintConfig struct {
+	UserAgent string
+	DeviceID  string
+	Resources Resources
+}
+
+func (c fingerprintConfig) build(rng *rand.Rand, nonce *int, elapsedMs *int64) []interface{} {
+	if rng == nil {
+		rng = rand.New(rand.NewSource(time.Now().UnixNano()))
+	}
+	resources := c.Resources
+	scriptSources := append([]string{}, resources.ScriptSources...)
 	if len(scriptSources) == 0 {
 		scriptSources = []string{defaultPowScript}
 	}
-	now := time.Now()
-	perfMs := float64(now.UnixNano()%int64(time.Second)) / float64(time.Millisecond)
+	scriptSources = append(scriptSources, sentinelSDKScript)
+	screen := screenSizes[rng.Intn(len(screenSizes))]
+	perfNow := rng.Float64() * 10000
+	timeOrigin := float64(time.Now().UnixMilli()) - perfNow
+	nonceValue := 1
+	if nonce != nil {
+		nonceValue = *nonce
+	}
+	randomOrElapsed := rng.Float64()
+	if elapsedMs != nil {
+		randomOrElapsed = float64(*elapsedMs)
+	}
+	userAgent := c.UserAgent
+	if userAgent == "" {
+		userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+	}
+	deviceID := c.DeviceID
+	if deviceID == "" {
+		deviceID = uuid.NewString()
+	}
 	return []interface{}{
-		screenValues[rng.Intn(len(screenValues))],
-		legacyParseTime(),
-		int64(4294705152),
-		0,
+		screen[0] + screen[1],
+		jsDateString(time.Now(), "America/Los_Angeles"),
+		int64(4294967296),
+		nonceValue,
 		userAgent,
 		scriptSources[rng.Intn(len(scriptSources))],
 		resources.DataBuild,
 		"en-US",
-		"en-US,es-US,en,es",
-		0,
+		"en-US,en",
+		randomOrElapsed,
 		navigatorKeys[rng.Intn(len(navigatorKeys))],
 		documentKeys[rng.Intn(len(documentKeys))],
 		windowKeys[rng.Intn(len(windowKeys))],
-		perfMs,
-		uuid.NewString(),
+		perfNow,
+		deviceID,
 		"",
-		cores[rng.Intn(len(cores))],
-		float64(now.UnixMilli()) - perfMs,
+		8 + rng.Intn(4)*4,
+		timeOrigin,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
 	}
 }
 
-func legacyParseTime() string {
-	loc := time.FixedZone("Eastern Standard Time", -5*60*60)
-	return time.Now().In(loc).Format("Mon Jan 02 2006 15:04:05") + " GMT-0500 (Eastern Standard Time)"
-}
-
-func generate(seed string, difficulty string, config []interface{}) (string, bool) {
-	target, err := hex.DecodeString(difficulty)
-	if err != nil || len(target) == 0 {
-		return "", false
+func jsDateString(t time.Time, timezone string) string {
+	if loc, err := time.LoadLocation(timezone); err == nil {
+		t = t.In(loc)
 	}
-	diffLen := len(difficulty) / 2
-	seedBytes := []byte(seed)
-	static1 := mustJSONPrefix(config[:3])
-	static2 := mustJSONMiddle(config[4:9])
-	static3 := mustJSONSuffix(config[10:])
-	hasher := sha3.New512()
-	for i := 0; i < maxAttempts; i++ {
-		finalJSON := bytes.NewBuffer(make([]byte, 0, 512))
-		finalJSON.Write(static1)
-		finalJSON.WriteString(fmt.Sprintf("%d", i))
-		finalJSON.Write(static2)
-		finalJSON.WriteString(fmt.Sprintf("%d", i>>1))
-		finalJSON.Write(static3)
-		encoded := []byte(base64.StdEncoding.EncodeToString(finalJSON.Bytes()))
-		hasher.Write(seedBytes)
-		hasher.Write(encoded)
-		digest := hasher.Sum(nil)
-		hasher.Reset()
-		if bytes.Compare(digest[:diffLen], target) <= 0 {
-			return string(encoded), true
-		}
+	head := t.Format("Mon Jan 2 2006 15:04:05")
+	_, offset := t.Zone()
+	sign := "+"
+	if offset < 0 {
+		sign = "-"
+		offset = -offset
 	}
-	fallback := "wQ8Lk5FbGpA2NcR9dShT6gYjU7VxZ4D" + base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%q", seed)))
-	return fallback, false
+	hours := offset / 3600
+	minutes := (offset % 3600) / 60
+	name, _ := t.Zone()
+	full := map[string]string{
+		"PDT": "Pacific Daylight Time",
+		"PST": "Pacific Standard Time",
+		"EDT": "Eastern Daylight Time",
+		"EST": "Eastern Standard Time",
+	}[name]
+	if full == "" {
+		full = name
+	}
+	return fmt.Sprintf("%s GMT%s%02d%02d (%s)", head, sign, hours, minutes, full)
 }
 
-func mustJSONPrefix(values []interface{}) []byte {
-	b, _ := json.Marshal(values)
-	return append(b[:len(b)-1], ',')
+func encodeConfig(config []interface{}) string {
+	data, err := json.Marshal(config)
+	if err != nil {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(data)
 }
 
-func mustJSONMiddle(values []interface{}) []byte {
-	b, _ := json.Marshal(values)
-	return append(append([]byte{','}, b[1:len(b)-1]...), ',')
-}
-
-func mustJSONSuffix(values []interface{}) []byte {
-	b, _ := json.Marshal(values)
-	return append([]byte{','}, b[1:]...)
+func fnv1aHash(text string) string {
+	const (
+		fnvOffset = 2166136261
+		fnvPrime  = 16777619
+	)
+	h := uint32(fnvOffset)
+	for _, ch := range text {
+		h ^= uint32(ch)
+		h *= fnvPrime
+	}
+	h ^= h >> 16
+	h *= 2246822507
+	h ^= h >> 13
+	h *= 3266489909
+	h ^= h >> 16
+	return fmt.Sprintf("%08x", h)
 }

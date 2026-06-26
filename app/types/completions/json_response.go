@@ -66,8 +66,6 @@ func NewToolCallsApiRespJson(id string, model string, content string, toolCalls 
 	resp := NewApiRespJson(id, model, content)
 	resp.Choices[0].Message.ToolCalls = toolCalls
 	resp.Choices[0].FinishReason = "tool_calls"
-	if content == "" {
-		resp.Choices[0].Message.Content = nil
-	}
+	resp.Choices[0].Message.Content = nil
 	return resp
 }
